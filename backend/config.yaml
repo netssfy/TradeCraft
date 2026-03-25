@@ -1,0 +1,27 @@
+# backend/config.yaml
+mode: backtest
+
+bar_interval: 1m
+
+backtest:
+  start_date: "2026-01-01"
+  end_date: "2026-03-20"
+
+data_sources:
+  CN: akshare
+  HK: yfinance
+  US: yfinance
+
+traders:
+  - id: trader0
+    market: CN
+    initial_cash: 1000000.0
+    allowed_symbols:
+      - "000001"   # 平安银行（akshare 格式）
+    strategy_path: "strategies/my_strategy.py"
+    order_timeout_seconds: 300
+    commission_rate: 0.0003
+
+logging:
+  level: INFO
+  file: "data/logs/tradecraft.log"
