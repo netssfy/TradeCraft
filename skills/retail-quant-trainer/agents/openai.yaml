@@ -1,0 +1,4 @@
+interface:
+  display_name: "Retail Quant Trainer"
+  short_description: "Train explainable retail stock AI traders."
+  default_prompt: "Train explainable AI stock traders for small-capital retail users, implement Strategy-compatible code, and run daily post-close strategy updates."
