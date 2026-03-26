@@ -5,7 +5,6 @@ Engine — 系统核心调度器。
 """
 from __future__ import annotations
 
-import json
 import logging
 import os
 import time
@@ -21,6 +20,7 @@ from app.data.market import BarInterval, Market
 from app.data.repository import MarketRepository
 from app.engine.context import Context
 from app.engine.models import Bar
+from app.engine.trader_store import TraderStore
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,7 @@ class Engine:
         simulator: Simulator,
         data_feeds: List[DataFeed],
         config: Config,
+        store: Optional[TraderStore] = None,
     ) -> None:
         self.mode = mode
         self.traders = traders
@@ -49,9 +50,15 @@ class Engine:
         self.simulator = simulator
         self.data_feeds = data_feeds
         self.config = config
+        self.store = store or TraderStore()
 
         self._stop_flag: bool = False
-        self._run_id: str = datetime.utcnow().strftime("%Y%m%d_%H%M%S_") + str(uuid.uuid4())[:8]
+
+        # run_id: backtest 用时间戳+uuid，paper 用日期
+        if mode == EngineMode.PAPER:
+            self._run_id: str = datetime.utcnow().strftime("%Y%m%d")
+        else:
+            self._run_id: str = datetime.utcnow().strftime("%Y%m%d_%H%M%S_") + str(uuid.uuid4())[:8]
 
         # Build a mapping: Market → DataFeed for quick lookup
         self._feed_for_market: Dict[Market, DataFeed] = {}
@@ -185,16 +192,13 @@ class Engine:
 
     def _tick(self, bar_time: datetime) -> None:
         """单个 Bar 的完整处理：按 Market 分发 Bar → 驱动 Trader → PAPER 模式落盘。"""
-        # Collect bars fetched in PAPER mode so we can persist them after all traders run
-        paper_bars: List[Bar] = []
+        bar_interval = _parse_bar_interval(self.config.bar_interval)
 
         for trader in self.traders:
             market = trader.market
             symbols = trader.allowed_symbols
 
             if symbols is None:
-                # No symbol restriction — read all available bars for this market at bar_time
-                # We can't enumerate all symbols without a list, so skip gracefully
                 logger.debug(
                     "Trader '%s' has allowed_symbols=None; cannot dispatch bars without symbol list.",
                     trader.id,
@@ -202,35 +206,32 @@ class Engine:
                 continue
 
             for symbol in symbols:
-                # In PAPER mode, fetch the latest bar from the data feed first
+                # PAPER 模式：先 fetch 并写入 repository，再读取
                 if self.mode == EngineMode.PAPER:
                     feed = self._feed_for_market.get(market)
                     if feed is not None:
                         try:
                             fetched = feed.fetch(
-                                symbol, market, BarInterval.M1,
-                                bar_time - timedelta(minutes=2),
+                                symbol, market, bar_interval,
+                                bar_time - timedelta(minutes=30),
                                 bar_time,
                             )
                             if fetched:
-                                paper_bars.extend(fetched)
+                                self.repository.write(fetched, market, symbol, bar_interval)
                         except Exception as exc:
                             logger.error(
                                 "PAPER fetch failed for %s/%s at %s: %s",
                                 market.value, symbol, bar_time.isoformat(), exc,
                             )
 
-                # Read the bar for this symbol at bar_time from the repository
-                bar_interval = _parse_bar_interval(self.config.bar_interval)
                 bars = self.repository.read(
                     symbol, market, bar_interval,
-                    bar_time - timedelta(seconds=1),
+                    bar_time - timedelta(seconds=60 * 20),
                     bar_time,
                 )
                 if not bars:
                     continue
 
-                # Use the most recent bar at or before bar_time
                 bar = bars[-1]
 
                 try:
@@ -242,13 +243,14 @@ class Engine:
                         exc_info=True,
                     )
 
-        # PAPER mode: persist newly fetched bars to repository
-        if self.mode == EngineMode.PAPER and paper_bars:
-            for bar in paper_bars:
+        # PAPER 模式：每 tick 实时落盘 portfolio 和 trades
+        if self.mode == EngineMode.PAPER:
+            for trader in self.traders:
                 try:
-                    self.repository.write([bar], bar.market, bar.symbol, bar.interval)
+                    trader.save_portfolio(self.store)
+                    trader.save_trades(self.store, self._run_id, mode="paper")
                 except Exception as exc:
-                    logger.error("Failed to persist bar %s/%s: %s", bar.symbol, bar.interval.value, exc)
+                    logger.error("PAPER persist failed for trader '%s': %s", trader.id, exc)
 
     def _run_loop(self) -> None:
         """主循环：BACKTEST 直接跳 Bar，PAPER 等待真实 1 分钟。"""
@@ -317,7 +319,7 @@ class Engine:
         logger.info("Backtest loop completed.")
 
     def _run_paper(self) -> None:
-        """PAPER 模式：每分钟拉取最新数据并推进一个 Bar。"""
+        """PAPER 模式：每分钟第 2 秒触发一次，对齐时钟避免漂移。"""
         logger.info("Paper trading loop started.")
         while not self._stop_flag:
             now = datetime.now(tz=timezone.utc)
@@ -326,8 +328,11 @@ class Engine:
             if self._stop_flag:
                 break
 
-            # Wait for the next minute
-            time.sleep(60)
+            # 对齐到下一分钟的第 2 秒
+            next_run = now.replace(second=2, microsecond=0) + timedelta(minutes=1)
+            sleep_secs = (next_run - datetime.now(tz=timezone.utc)).total_seconds()
+            if sleep_secs > 0:
+                time.sleep(sleep_secs)
 
         logger.info("Paper trading loop stopped.")
 
@@ -392,60 +397,19 @@ class Engine:
 
     def _persist_portfolios(self) -> None:
         """PAPER 模式：持久化所有 Trader 的 Portfolio 状态。"""
-        os.makedirs("data/cache", exist_ok=True)
         for trader in self.traders:
-            path = f"data/cache/portfolio_{trader.id}.json"
             try:
-                portfolio = trader.portfolio
-                data = {
-                    "trader_id": trader.id,
-                    "cash": portfolio.cash,
-                    "positions": {
-                        symbol: {
-                            "symbol": pos.symbol,
-                            "quantity": pos.quantity,
-                            "avg_cost": pos.avg_cost,
-                        }
-                        for symbol, pos in portfolio.positions.items()
-                    },
-                    "trade_history": [
-                        {
-                            "timestamp": t.timestamp.isoformat(),
-                            "symbol": t.symbol,
-                            "direction": t.direction.value,
-                            "quantity": t.quantity,
-                            "price": t.price,
-                            "commission": t.commission,
-                        }
-                        for t in portfolio.trade_history
-                    ],
-                }
-                with open(path, "w", encoding="utf-8") as f:
-                    json.dump(data, f, ensure_ascii=False, indent=2)
+                path = trader.save_portfolio(self.store)
                 logger.info("Portfolio persisted for trader '%s' → %s", trader.id, path)
             except Exception as exc:
                 logger.error("Failed to persist portfolio for trader '%s': %s", trader.id, exc)
 
     def _persist_trade_records(self) -> None:
-        """持久化所有 Trader 的已成交记录到 data/runs/{run_id}/。"""
-        run_dir = os.path.join("data", "runs", self._run_id)
-        os.makedirs(run_dir, exist_ok=True)
+        """持久化所有 Trader 的已成交记录。"""
+        mode = "paper" if self.mode == EngineMode.PAPER else "backtest"
         for trader in self.traders:
-            path = os.path.join(run_dir, f"{trader.id}_trades.json")
             try:
-                trades = [
-                    {
-                        "timestamp": t.timestamp.isoformat(),
-                        "symbol": t.symbol,
-                        "direction": t.direction.value,
-                        "quantity": t.quantity,
-                        "price": t.price,
-                        "commission": t.commission,
-                    }
-                    for t in trader.portfolio.trade_history
-                ]
-                with open(path, "w", encoding="utf-8") as f:
-                    json.dump(trades, f, ensure_ascii=False, indent=2)
+                path = trader.save_trades(self.store, self._run_id, mode=mode)
                 logger.info("Trade records persisted for trader '%s' → %s", trader.id, path)
             except Exception as exc:
                 logger.error("Failed to persist trade records for trader '%s': %s", trader.id, exc)
@@ -455,12 +419,9 @@ class Engine:
     # ------------------------------------------------------------------
 
     def _generate_reports(self) -> list:
-        """回测结束时为每个 Trader 生成 Report，写入 data/runs/{run_id}/{trader_id}_report.json。"""
+        """回测结束时为每个 Trader 生成 Report，写入 data/traders/{name}/trades/{run_id}_report.json。"""
         from app.backtest.metrics import Metrics
         from app.backtest.report import Report
-
-        run_dir = os.path.join("data", "runs", self._run_id)
-        os.makedirs(run_dir, exist_ok=True)
 
         backtest_start = datetime.strptime(
             self.config.backtest.start_date, "%Y-%m-%d"
@@ -474,23 +435,26 @@ class Engine:
             portfolio = trader.portfolio
             trades = portfolio.trade_history
 
-            # Build NAV series from trade history (simplified: use cash + position value at each trade)
-            # For a proper NAV series we'd need price snapshots; use a minimal approach:
-            # nav_series = [initial_cash, ..., final_nav] derived from trade timestamps
-            initial_cash = self.config.traders[
-                next(i for i, tc in enumerate(self.config.traders) if tc.id == trader.id)
-            ].initial_cash
+            # initial_cash: 从 trader.json 读取，fallback 到当前 cash
+            try:
+                info = self.store.load_info(trader.id)
+                initial_cash = float(info.get("initial_cash", portfolio.cash))
+            except Exception:
+                initial_cash = portfolio.cash
 
-            # Compute final NAV: cash + sum of remaining positions at last known price
-            # Since we don't have current prices here, use cash only as a conservative estimate
-            # and build a simple nav_series from portfolio snapshots if available.
-            # Minimal approach: nav_series = [initial_cash, final_cash_approx]
-            final_nav = portfolio.cash  # positions not liquidated; best available estimate
-
-            # Build a simple nav_series for metrics (initial → final)
+            final_nav = portfolio.cash
+            # 加上持仓市值：用回测结束时各 symbol 的最新收盘价估算
+            for symbol, pos in portfolio.positions.items():
+                if pos.quantity <= 0:
+                    continue
+                bar_interval = _parse_bar_interval(self.config.bar_interval)
+                bars = self.repository.read(
+                    symbol, trader.market, bar_interval,
+                    backtest_start, backtest_end,
+                )
+                if bars:
+                    final_nav += pos.quantity * bars[-1].close
             nav_series = [initial_cash, final_nav] if final_nav != initial_cash else [initial_cash, initial_cash]
-
-            trader_cfg = next(tc for tc in self.config.traders if tc.id == trader.id)
 
             metrics_dict = {
                 "annualized_return": Metrics.annualized_return(nav_series),
@@ -502,7 +466,6 @@ class Engine:
 
             report = Report(
                 trader_id=trader.id,
-                strategy_params=trader_cfg.strategy_params,
                 backtest_start=backtest_start,
                 backtest_end=backtest_end,
                 initial_cash=initial_cash,
@@ -511,7 +474,10 @@ class Engine:
                 trades=list(trades),
             )
 
-            path = os.path.join(run_dir, f"{trader.id}_report.json")
+            # 写入 trader 自己的 backtest 目录
+            trades_dir = self.store.trades_dir(trader.id, "backtest")
+            os.makedirs(trades_dir, exist_ok=True)
+            path = os.path.join(trades_dir, f"{self._run_id}_report.json")
             try:
                 with open(path, "w", encoding="utf-8") as f:
                     f.write(report.to_json())
@@ -524,25 +490,27 @@ class Engine:
         return reports
 
     # ------------------------------------------------------------------
-    # Task 11.4 — from_config() factory
+    # Factory — from_traders_dir()
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_config(cls, config_path: Optional[str] = None) -> "Engine":
-        """根据配置文件实例化所有组件并返回 Engine 实例。"""
+    def from_traders_dir(
+        cls,
+        config_path: Optional[str] = None,
+        traders_dir: str = "data/traders",
+    ) -> "Engine":
+        """从 data/traders/ 目录加载所有 Trader，结合全局配置构建 Engine。
+
+        config.yaml 只需保留全局字段：mode、bar_interval、backtest、data_sources、logging。
+        Trader 相关配置全部来自各自的 trader.json。
+        """
         from app.adapters.data_feed import AkshareDataFeed, BaostockDataFeed, YfinanceDataFeed
-        from app.engine.events import EventBus
-        from app.engine.orders import OrderManager
-        from app.engine.portfolio import Portfolio
         from app.engine.trader import Trader
-        from app.trading.strategy_loader import StrategyLoader
+        from app.engine.trader_store import TraderStore
 
         config = load_config(config_path)
-
-        # Determine engine mode
         mode = EngineMode(config.mode)
 
-        # Build DataFeed instances based on config.data_sources
         _FEED_CLASSES = {
             "akshare": AkshareDataFeed,
             "baostock": BaostockDataFeed,
@@ -560,44 +528,26 @@ class Engine:
 
         data_feeds = list(feed_instances.values())
 
-        # Create shared repository and simulator
         repository = MarketRepository()
+        # commission_rate per-trader; use a default simulator (each trader carries its own rate)
+        simulator = Simulator(commission_rate=0.0003)
 
-        # Use commission_rate from the first trader config (or default)
-        commission_rate = config.traders[0].commission_rate if config.traders else 0.0003
-        simulator = Simulator(commission_rate=commission_rate)
+        store = TraderStore(base_dir=traders_dir)
+        trader_names = store.list_traders()
+        if not trader_names:
+            raise ValueError(f"No traders found in '{traders_dir}'. Create a trader first.")
 
-        # Create Trader instances
         traders: List[Trader] = []
-        for trader_cfg in config.traders:
-            market = Market(trader_cfg.market)
+        for name in trader_names:
+            try:
+                trader = Trader.from_dir(name, store, repository, simulator)
+                traders.append(trader)
+                logger.info("Loaded trader '%s' from %s", name, store.trader_dir(name))
+            except Exception as exc:
+                logger.error("Failed to load trader '%s': %s", name, exc, exc_info=True)
 
-            # Load strategy
-            result = StrategyLoader.load(trader_cfg.strategy_path, trader_cfg.strategy_params)
-            if not result.success:
-                raise ValueError(
-                    f"Failed to load strategy for trader '{trader_cfg.id}': {result.error}"
-                )
-
-            event_bus = EventBus()
-            order_manager = OrderManager(
-                trader_id=trader_cfg.id,
-                allowed_symbols=trader_cfg.allowed_symbols,
-                event_bus=event_bus,
-            )
-            portfolio = Portfolio(initial_cash=trader_cfg.initial_cash)
-
-            trader = Trader(
-                id=trader_cfg.id,
-                market=market,
-                strategy=result.strategy,
-                order_manager=order_manager,
-                portfolio=portfolio,
-                repository=repository,
-                simulator=simulator,
-                allowed_symbols=trader_cfg.allowed_symbols,
-            )
-            traders.append(trader)
+        if not traders:
+            raise ValueError("No traders could be loaded successfully.")
 
         return cls(
             mode=mode,
@@ -606,6 +556,7 @@ class Engine:
             simulator=simulator,
             data_feeds=data_feeds,
             config=config,
+            store=store,
         )
 
 

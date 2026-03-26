@@ -1,0 +1,176 @@
+"""
+TraderStore — Trader 持久化管理。
+
+目录结构：
+  data/traders/{name}/
+    trader.json       # 基础信息（market、initial_cash、allowed_symbols 等）
+    strategy/         # 策略文件（.py）
+    trades/           # 历史成交记录（按 run_id 分文件）
+    portfolio/        # 持仓快照
+"""
+from __future__ import annotations
+
+import json
+import os
+import shutil
+from typing import Any, Dict, List, Optional
+
+
+TRADER_JSON = "trader.json"
+STRATEGY_DIR = "strategy"
+TRADES_DIR = "trades"
+PORTFOLIO_DIR = "portfolio"
+
+
+class TraderStoreError(Exception):
+    pass
+
+
+class TraderStore:
+    """负责 data/traders/{name}/ 目录的读写操作。"""
+
+    def __init__(self, base_dir: str = "data/traders") -> None:
+        self.base_dir = base_dir
+
+    # ------------------------------------------------------------------
+    # 目录路径辅助
+    # ------------------------------------------------------------------
+
+    def trader_dir(self, name: str) -> str:
+        return os.path.join(self.base_dir, name)
+
+    def trader_json_path(self, name: str) -> str:
+        return os.path.join(self.trader_dir(name), TRADER_JSON)
+
+    def strategy_dir(self, name: str) -> str:
+        return os.path.join(self.trader_dir(name), STRATEGY_DIR)
+
+    def trades_dir(self, name: str, mode: str = "backtest") -> str:
+        return os.path.join(self.trader_dir(name), "trades", mode)
+
+    def portfolio_dir(self, name: str) -> str:
+        return os.path.join(self.trader_dir(name), PORTFOLIO_DIR)
+
+    # ------------------------------------------------------------------
+    # 基础信息
+    # ------------------------------------------------------------------
+
+    def load_info(self, name: str) -> Dict[str, Any]:
+        """读取 trader.json，返回原始字典。"""
+        path = self.trader_json_path(name)
+        if not os.path.exists(path):
+            raise TraderStoreError(f"Trader '{name}' not found: {path}")
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    def save_info(self, name: str, info: Dict[str, Any]) -> None:
+        """写入 trader.json。"""
+        os.makedirs(self.trader_dir(name), exist_ok=True)
+        path = self.trader_json_path(name)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(info, f, ensure_ascii=False, indent=2)
+
+    # ------------------------------------------------------------------
+    # 策略文件
+    # ------------------------------------------------------------------
+
+    def get_strategy_path(self, name: str) -> str:
+        """返回 active_strategy 指定的策略文件路径。
+        
+        优先读取 trader.json 中的 active_strategy 字段；
+        若未配置则 fallback 到 strategy/ 目录下第一个 .py 文件。
+        """
+        sdir = self.strategy_dir(name)
+        if not os.path.isdir(sdir):
+            raise TraderStoreError(f"Strategy directory not found for trader '{name}': {sdir}")
+
+        # 尝试从 trader.json 读取 active_strategy
+        try:
+            info = self.load_info(name)
+            active = info.get("active_strategy")
+        except TraderStoreError:
+            active = None
+
+        if not active:
+            raise TraderStoreError(
+                f"Trader '{name}' has no active_strategy configured in trader.json"
+            )
+
+        path = os.path.join(sdir, active)
+        if not os.path.isfile(path):
+            raise TraderStoreError(
+                f"active_strategy '{active}' not found in {sdir}"
+            )
+        return path
+
+    def install_strategy(self, name: str, src_path: str) -> str:
+        """将策略文件复制到 strategy/ 目录，返回目标路径。"""
+        sdir = self.strategy_dir(name)
+        os.makedirs(sdir, exist_ok=True)
+        dst = os.path.join(sdir, os.path.basename(src_path))
+        shutil.copy2(src_path, dst)
+        return dst
+
+    # ------------------------------------------------------------------
+    # 历史成交
+    # ------------------------------------------------------------------
+
+    def save_trades(self, name: str, run_id: str, trades: List[Dict[str, Any]], mode: str = "backtest") -> str:
+        """将成交记录写入 trades/{mode}/{run_id}.json，返回文件路径。"""
+        tdir = self.trades_dir(name, mode)
+        os.makedirs(tdir, exist_ok=True)
+        path = os.path.join(tdir, f"{run_id}.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(trades, f, ensure_ascii=False, indent=2)
+        return path
+
+    def load_trades(self, name: str, run_id: str, mode: str = "backtest") -> List[Dict[str, Any]]:
+        """读取指定 run_id 的成交记录。"""
+        path = os.path.join(self.trades_dir(name, mode), f"{run_id}.json")
+        if not os.path.exists(path):
+            return []
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    def list_trade_runs(self, name: str, mode: str = "backtest") -> List[str]:
+        """列出所有历史 run_id。"""
+        tdir = self.trades_dir(name, mode)
+        if not os.path.isdir(tdir):
+            return []
+        return sorted(
+            f[:-5] for f in os.listdir(tdir) if f.endswith(".json")
+        )
+
+    # ------------------------------------------------------------------
+    # 持仓快照
+    # ------------------------------------------------------------------
+
+    def save_portfolio(self, name: str, snapshot: Dict[str, Any]) -> str:
+        """写入 portfolio/latest.json，返回文件路径。"""
+        pdir = self.portfolio_dir(name)
+        os.makedirs(pdir, exist_ok=True)
+        path = os.path.join(pdir, "latest.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(snapshot, f, ensure_ascii=False, indent=2)
+        return path
+
+    def load_portfolio(self, name: str) -> Optional[Dict[str, Any]]:
+        """读取最新持仓快照，不存在时返回 None。"""
+        path = os.path.join(self.portfolio_dir(name), "latest.json")
+        if not os.path.exists(path):
+            return None
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    # ------------------------------------------------------------------
+    # 枚举所有 trader
+    # ------------------------------------------------------------------
+
+    def list_traders(self) -> List[str]:
+        """返回 base_dir 下所有有效 trader 的名称列表。"""
+        if not os.path.isdir(self.base_dir):
+            return []
+        return sorted(
+            d for d in os.listdir(self.base_dir)
+            if os.path.isfile(os.path.join(self.base_dir, d, TRADER_JSON))
+        )

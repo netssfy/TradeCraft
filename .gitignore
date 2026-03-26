@@ -208,3 +208,4 @@ __marimo__/
 
 # Local data directory
 data/
+!backend/app/data/
