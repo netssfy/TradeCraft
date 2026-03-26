@@ -33,8 +33,13 @@
 │       └── src/
 │
 ├── backend/
+│   ├── run.py                     # 启动交易引擎（从 data/traders 加载 Trader）
+│   ├── server.py                  # 启动 FastAPI 服务（默认 :8000）
+│   ├── config.yaml                # 全局运行配置（不再内嵌 traders）
 │   ├── app/
-│   │   ├── api/                  # REST / WebSocket 接口
+│   │   ├── api/                   # REST API
+│   │   │   ├── __init__.py        # FastAPI app 实例
+│   │   │   └── traders.py         # Trader 资源接口
 │   │   ├── core/                 # 配置、依赖注入、通用基础设施
 │   │   ├── engine/               # 核心交易引擎（只保留一份）
 │   │   │   ├── core.py           # 策略执行主流程
@@ -42,7 +47,9 @@
 │   │   │   ├── orders.py         # 订单模型
 │   │   │   ├── portfolio.py      # 仓位 / 资金状态
 │   │   │   ├── risk.py           # 风控逻辑
-│   │   │   └── events.py         # 行情 / 订单 / 成交事件
+│   │   │   ├── events.py         # 行情 / 订单 / 成交事件
+│   │   │   ├── trader.py         # Trader 实体（支持从目录加载/保存）
+│   │   │   └── trader_store.py   # Trader 持久化存储
 │   │   │
 │   │   ├── runtimes/             # 运行时，只负责驱动 engine
 │   │   │   ├── backtest.py       # 回测运行时
@@ -72,13 +79,69 @@
 │   ├── pyproject.toml
 │   └── requirements.txt
 │
-├── data/                         # 本地数据目录（gitignore）
+├── data/                         # 本地数据目录（gitignore，运行时生成）
 │   ├── market/
-│   ├── cache/
+│   ├── traders/
+│   │   └── {trader_id}/
+│   │       ├── trader.json
+│   │       ├── strategy/
+│   │       ├── trades/
+│   │       │   ├── paper/
+│   │       │   └── backtest/
+│   │       └── portfolio/
+│   │           └── latest.json
 │   ├── logs/
-│   ├── runs/
-│   └── strategies/
+│   └── runs/
 │
 ├── package.json
 └── README.md
 ```
+
+## 启动方式
+
+### 1) 启动交易引擎
+
+```bash
+cd backend
+python run.py
+```
+
+- 入口：`backend/run.py`
+- 加载方式：`Engine.from_traders_dir(config_path="config.yaml", traders_dir="data/traders")`
+- 说明：`config.yaml` 仅保留全局运行项（如 `mode/bar_interval/data_sources`），Trader 配置来自 `data/traders/*/trader.json`
+
+### 2) 启动 REST API
+
+```bash
+cd backend
+python server.py
+```
+
+- 入口：`backend/server.py`
+- 文档地址：
+  - Swagger UI: `http://127.0.0.1:8000/docs`
+  - ReDoc: `http://127.0.0.1:8000/redoc`
+
+## Trader REST API（新增）
+
+基础前缀：`/traders`
+
+- `POST /traders`：创建 Trader（含基础信息与 traits）
+- `GET /traders`：获取 Trader 列表
+- `GET /traders/{trader_id}`：获取 Trader 详情
+- `PATCH /traders/{trader_id}`：更新 Trader 基础信息
+- `DELETE /traders/{trader_id}`：删除 Trader
+- `GET /traders/{trader_id}/strategy`：获取策略文件列表
+- `POST /traders/{trader_id}/strategy`：上传策略文件（`.py`）
+- `PUT /traders/{trader_id}/strategy/active?filename=...`：设置激活策略
+- `GET /traders/{trader_id}/portfolio`：获取最新持仓快照
+- `GET /traders/{trader_id}/trades`：获取成交记录索引（paper/backtest）
+- `GET /traders/{trader_id}/trades/{mode}/{run_id}`：获取单次运行成交明细
+
+## 依赖变更（后端）
+
+后端新增 API 相关依赖：
+
+- `fastapi>=0.110`
+- `uvicorn[standard]>=0.29`
+- `python-multipart>=0.0.9`

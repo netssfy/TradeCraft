@@ -1,28 +1,29 @@
 from __future__ import annotations
 
+import json
 import os
+import re
+import subprocess
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
+from starlette.responses import StreamingResponse
 
-from app.engine.trader_store import TraderStore, TraderStoreError
+from app.engine.trader_store import TraderStore
 
 router = APIRouter(prefix="/traders", tags=["traders"])
 store = TraderStore(base_dir="data/traders")
 
 
-# ---------------------------------------------------------------------------
-# Shared models
-# ---------------------------------------------------------------------------
-
 class TraitsModel(BaseModel):
-    risk_appetite: str = Field(..., description="风险偏好: conservative / balanced / aggressive within bounds")
-    holding_horizon: str = Field(..., description="持仓周期: short swing / medium trend / event-driven tactical")
-    signal_preference: str = Field(..., description="信号偏好: trend-following / mean-reversion / event-confirmed")
-    position_construction: str = Field(..., description="建仓方式: single-entry fixed size / layered entry / risk-budget sizing")
-    exit_discipline: str = Field(..., description="退出纪律: fixed stop + fixed take-profit / trailing stop / time stop + condition stop")
-    universe_focus: str = Field(..., description="标的范围: large/mega-cap leaders / sector leaders / narrow watchlist")
+    risk_appetite: str = Field(..., description="Risk appetite.")
+    holding_horizon: str = Field(..., description="Holding horizon.")
+    signal_preference: str = Field(..., description="Signal preference.")
+    position_construction: str = Field(..., description="Position sizing style.")
+    exit_discipline: str = Field(..., description="Exit discipline.")
+    universe_focus: str = Field(..., description="Universe focus.")
 
 
 class TraderInfo(BaseModel):
@@ -62,72 +63,118 @@ class StrategyFileModel(BaseModel):
     is_active: bool
 
 
-# ---------------------------------------------------------------------------
-# POST /traders — 创建
-# ---------------------------------------------------------------------------
-
 class CreateTraderRequest(BaseModel):
-    id: str = Field(..., description="Trader 唯一标识符")
-    market: str = Field(..., description="市场: CN / HK / US")
-    initial_cash: float = Field(..., gt=0, description="初始资金")
-    allowed_symbols: List[str] = Field(..., min_length=1, description="允许交易的标的列表")
-    commission_rate: float = Field(..., ge=0, le=0.01, description="佣金率，例如 0.0003")
-    order_timeout_seconds: int = Field(300, gt=0, description="订单超时秒数")
-    traits: TraitsModel
+    id: str = Field(..., description="Trader unique id")
+    market: str = Field(..., description="CN / HK / US")
+    initial_cash: float = Field(..., gt=0, description="Initial cash")
+    allowed_symbols: List[str] = Field(..., min_length=1, description="Allowed symbols")
+    commission_rate: float = Field(..., ge=0, le=0.01, description="Commission rate")
+    order_timeout_seconds: int = Field(300, gt=0, description="Order timeout in seconds")
 
 
 @router.post(
     "",
-    response_model=TraderInfo,
     status_code=201,
-    summary="创建 Trader",
-    description="创建新 Trader 并初始化目录结构，active_strategy 默认为空。",
+    summary="Create Trader",
+    description="Stream Codex trainer output, then emit final trader info.",
 )
 def create_trader(req: CreateTraderRequest):
-    if req.id in store.list_traders():
+    # 1) duplicate check by id
+    if req.id in store.list_traders() or os.path.exists(store.trader_dir(req.id)):
         raise HTTPException(status_code=409, detail=f"Trader '{req.id}' already exists.")
 
-    info = {
-        "id": req.id,
-        "market": req.market,
-        "initial_cash": req.initial_cash,
-        "allowed_symbols": req.allowed_symbols,
-        "commission_rate": req.commission_rate,
-        "order_timeout_seconds": req.order_timeout_seconds,
-        "active_strategy": "",
-        "traits": req.traits.model_dump(),
-    }
-    store.save_info(req.id, info)
+    # 2) create dirs first
+    os.makedirs(store.trader_dir(req.id), exist_ok=True)
     os.makedirs(store.strategy_dir(req.id), exist_ok=True)
     os.makedirs(store.trades_dir(req.id, "paper"), exist_ok=True)
     os.makedirs(store.trades_dir(req.id, "backtest"), exist_ok=True)
     os.makedirs(store.portfolio_dir(req.id), exist_ok=True)
 
-    return _load_trader_info(req.id)
+    def _stream():
+        yield _sse_event("log", {"message": "Starting Codex trainer..."})
+        traits: Optional[Dict[str, Any]] = None
+        output_lines: List[str] = []
+
+        try:
+            process = subprocess.Popen(
+                _build_codex_cmd(),
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,
+            )
+        except Exception as exc:
+            yield _sse_event("error", {"message": f"Failed to start Codex: {exc}"})
+            return
+
+        prompt = _build_codex_prompt(req)
+        assert process.stdin is not None
+        process.stdin.write(prompt)
+        process.stdin.close()
+
+        assert process.stdout is not None
+        for raw in process.stdout:
+            line = raw.rstrip("\r\n")
+            output_lines.append(line)
+            yield _sse_event("log", {"message": line})
+
+            if "FINAL_TRAITS_JSON:" in line:
+                candidate = line.split("FINAL_TRAITS_JSON:", 1)[1].strip()
+                try:
+                    traits = json.loads(candidate)
+                except json.JSONDecodeError:
+                    pass
+
+        return_code = process.wait()
+        if return_code != 0:
+            yield _sse_event("error", {"message": f"Codex exited with status {return_code}"})
+            return
+
+        if traits is None:
+            joined = "\n".join(output_lines)
+            match = re.search(r"FINAL_TRAITS_JSON:\s*(\{.*\})", joined)
+            if match:
+                try:
+                    traits = json.loads(match.group(1))
+                except json.JSONDecodeError:
+                    traits = None
+
+        if traits is None:
+            yield _sse_event("error", {"message": "Trainer output missing FINAL_TRAITS_JSON"})
+            return
+
+        # 4) save info
+        info = {
+            "id": req.id,
+            "market": req.market,
+            "initial_cash": req.initial_cash,
+            "allowed_symbols": req.allowed_symbols,
+            "commission_rate": req.commission_rate,
+            "order_timeout_seconds": req.order_timeout_seconds,
+            "active_strategy": "",
+            "traits": TraitsModel(**traits).model_dump(),
+        }
+        store.save_info(req.id, info)
+
+        final_info = _load_trader_info(req.id).model_dump()
+        yield _sse_event("result", final_info)
+
+    return StreamingResponse(_stream(), media_type="text/event-stream")
 
 
-# ---------------------------------------------------------------------------
-# GET /traders — 列表
-# ---------------------------------------------------------------------------
-
-@router.get("", response_model=List[TraderInfo], summary="获取所有 Trader")
+@router.get("", response_model=List[TraderInfo], summary="List traders")
 def list_traders():
     return [_load_trader_info(name) for name in store.list_traders()]
 
 
-# ---------------------------------------------------------------------------
-# GET /traders/{id} — 详情
-# ---------------------------------------------------------------------------
-
-@router.get("/{trader_id}", response_model=TraderInfo, summary="获取 Trader 详情")
+@router.get("/{trader_id}", response_model=TraderInfo, summary="Get trader")
 def get_trader(trader_id: str):
     _assert_exists(trader_id)
     return _load_trader_info(trader_id)
 
-
-# ---------------------------------------------------------------------------
-# PATCH /traders/{id} — 更新基础信息
-# ---------------------------------------------------------------------------
 
 class UpdateTraderRequest(BaseModel):
     initial_cash: Optional[float] = Field(None, gt=0)
@@ -137,7 +184,7 @@ class UpdateTraderRequest(BaseModel):
     traits: Optional[TraitsModel] = None
 
 
-@router.patch("/{trader_id}", response_model=TraderInfo, summary="更新 Trader 基础信息")
+@router.patch("/{trader_id}", response_model=TraderInfo, summary="Update trader")
 def update_trader(trader_id: str, req: UpdateTraderRequest):
     _assert_exists(trader_id)
     info = store.load_info(trader_id)
@@ -155,27 +202,18 @@ def update_trader(trader_id: str, req: UpdateTraderRequest):
     return _load_trader_info(trader_id)
 
 
-# ---------------------------------------------------------------------------
-# DELETE /traders/{id} — 删除
-# ---------------------------------------------------------------------------
-
-@router.delete("/{trader_id}", status_code=204, summary="删除 Trader")
+@router.delete("/{trader_id}", status_code=204, summary="Delete trader")
 def delete_trader(trader_id: str):
     _assert_exists(trader_id)
     import shutil
+
     shutil.rmtree(store.trader_dir(trader_id))
 
-
-# ---------------------------------------------------------------------------
-# GET/PUT /traders/{id}/strategy — 策略文件列表
-# POST /traders/{id}/strategy — 上传策略文件
-# PUT /traders/{id}/strategy/active — 设置激活策略
-# ---------------------------------------------------------------------------
 
 @router.get(
     "/{trader_id}/strategy",
     response_model=List[StrategyFileModel],
-    summary="获取策略文件列表",
+    summary="List strategy files",
 )
 def list_strategies(trader_id: str):
     _assert_exists(trader_id)
@@ -195,12 +233,12 @@ def list_strategies(trader_id: str):
     "/{trader_id}/strategy",
     response_model=StrategyFileModel,
     status_code=201,
-    summary="上传策略文件",
+    summary="Upload strategy file",
 )
 async def upload_strategy(trader_id: str, file: UploadFile = File(...)):
     _assert_exists(trader_id)
     if not file.filename.endswith(".py"):
-        raise HTTPException(status_code=400, detail="只支持 .py 文件")
+        raise HTTPException(status_code=400, detail="Only .py files are supported.")
     sdir = store.strategy_dir(trader_id)
     os.makedirs(sdir, exist_ok=True)
     dest = os.path.join(sdir, file.filename)
@@ -215,49 +253,36 @@ async def upload_strategy(trader_id: str, file: UploadFile = File(...)):
 @router.put(
     "/{trader_id}/strategy/active",
     response_model=TraderInfo,
-    summary="设置激活策略",
+    summary="Set active strategy",
 )
 def set_active_strategy(trader_id: str, filename: str):
     _assert_exists(trader_id)
     sdir = store.strategy_dir(trader_id)
     if not os.path.isfile(os.path.join(sdir, filename)):
-        raise HTTPException(status_code=404, detail=f"策略文件 '{filename}' 不存在")
+        raise HTTPException(status_code=404, detail=f"Strategy file '{filename}' not found.")
     info = store.load_info(trader_id)
     info["active_strategy"] = filename
     store.save_info(trader_id, info)
     return _load_trader_info(trader_id)
 
 
-# ---------------------------------------------------------------------------
-# GET /traders/{id}/portfolio — 持仓快照
-# ---------------------------------------------------------------------------
-
-@router.get("/{trader_id}/portfolio", response_model=PortfolioModel, summary="获取持仓快照")
+@router.get("/{trader_id}/portfolio", response_model=PortfolioModel, summary="Get portfolio snapshot")
 def get_portfolio(trader_id: str):
     _assert_exists(trader_id)
     snapshot = store.load_portfolio(trader_id)
     if snapshot is None:
-        raise HTTPException(status_code=404, detail="暂无持仓快照")
+        raise HTTPException(status_code=404, detail="No portfolio snapshot.")
     return PortfolioModel(
         trader_id=snapshot["trader_id"],
         cash=snapshot["cash"],
-        positions={
-            sym: PositionModel(**pos)
-            for sym, pos in snapshot.get("positions", {}).items()
-        },
+        positions={sym: PositionModel(**pos) for sym, pos in snapshot.get("positions", {}).items()},
     )
 
-
-# ---------------------------------------------------------------------------
-# GET /traders/{id}/trades — 成交记录列表（按 mode）
-# GET /traders/{id}/trades/{mode}/{run_id} — 单次运行成交记录
-# ---------------------------------------------------------------------------
 
 @router.get(
     "/{trader_id}/trades",
     response_model=Dict[str, List[str]],
-    summary="获取成交记录索引",
-    description="返回 paper 和 backtest 两个模式下的所有 run_id 列表。",
+    summary="List trade runs",
 )
 def list_trades(trader_id: str):
     _assert_exists(trader_id)
@@ -270,21 +295,17 @@ def list_trades(trader_id: str):
 @router.get(
     "/{trader_id}/trades/{mode}/{run_id}",
     response_model=List[TradeModel],
-    summary="获取单次运行成交记录",
+    summary="Get one trade run",
 )
 def get_trades(trader_id: str, mode: str, run_id: str):
     _assert_exists(trader_id)
     if mode not in ("paper", "backtest"):
-        raise HTTPException(status_code=400, detail="mode 只能是 paper 或 backtest")
+        raise HTTPException(status_code=400, detail="mode must be paper or backtest")
     trades = store.load_trades(trader_id, run_id, mode)
     if not trades:
-        raise HTTPException(status_code=404, detail=f"未找到 {mode}/{run_id} 的成交记录")
+        raise HTTPException(status_code=404, detail=f"Trades not found: {mode}/{run_id}")
     return [TradeModel(**t) for t in trades]
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 def _assert_exists(trader_id: str):
     if trader_id not in store.list_traders():
@@ -302,4 +323,40 @@ def _load_trader_info(trader_id: str) -> TraderInfo:
         order_timeout_seconds=info.get("order_timeout_seconds", 300),
         active_strategy=info.get("active_strategy", ""),
         traits=TraitsModel(**info.get("traits", {})),
+    )
+
+
+def _sse_event(event: str, payload: Dict[str, Any]) -> str:
+    return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def _build_codex_cmd() -> List[str]:
+    repo_root = Path(__file__).resolve().parents[3]
+    return [
+        "codex.cmd",
+        "exec",
+        "-C",
+        str(repo_root),
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--sandbox",
+        "danger-full-access",
+        "-",
+    ]
+
+
+def _build_codex_prompt(req: CreateTraderRequest) -> str:
+    repo_root = Path(__file__).resolve().parents[3]
+    skill_path = (repo_root / "skills" / "retail-quant-trainer" / "SKILL.md").as_posix()
+    return (
+        f"Use [$retail-quant-trainer]({skill_path}). "
+        f"Create exactly one trader with id '{req.id}'. "
+        f"Market: {req.market}. "
+        f"Initial cash: {req.initial_cash}. "
+        f"Allowed symbols: {', '.join(req.allowed_symbols)}. "
+        f"Commission rate: {req.commission_rate}. "
+        f"Order timeout seconds: {req.order_timeout_seconds}. "
+        "Do not call backend API directly. "
+        "Create trader skill artifacts only. "
+        "At the end print exactly one line: "
+        'FINAL_TRAITS_JSON: {"risk_appetite":"...","holding_horizon":"...","signal_preference":"...","position_construction":"...","exit_discipline":"...","universe_focus":"..."}'
     )

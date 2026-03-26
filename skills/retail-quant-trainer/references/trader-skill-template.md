@@ -7,8 +7,8 @@ The trader artifact must instruct the executing agent to output strategy code co
 
 ## Trader Naming and Location (Required)
 
-- Save each trader to: `data/traders/{name}`
-- `{name}` must be trait-based and short:
+- Save each trader under: `data/traders/{id}`
+- `{id}` must be trait-based and short:
   - Include key style signals (for example: trend, meanrev, event)
   - Include risk flavor (for example: cons, bal, aggr)
   - Keep length at 8-24 chars, lowercase letters, digits, and hyphens only
@@ -22,7 +22,7 @@ The trader artifact must instruct the executing agent to output strategy code co
 Recommended structure:
 
 ```text
-data/traders/{name}/
+data/traders/{id}/
   SKILL.md
   references/
     metrics.json
@@ -35,13 +35,13 @@ data/traders/{name}/
 - Read style card and risk policy first.
 - Run the daily autoresearch loop.
 - Output or update one strategy file:
-  - `backend/strategies/{name}_strategy.py`
+  - `backend/strategies/{id}_strategy.py`
 - Ensure the class inherits `Strategy` and implements required methods.
 - Do not pre-commit concrete algorithm rules during trainer generation.
 
 ## Option B: Standalone Trader Prompt
 
-If no folder is needed, still create `data/traders/{name}/` and place one `trader_program.md` with:
+If no folder is needed, still create `data/traders/{id}/` and place one `trader_program.md` with:
 - Objective and scope.
 - Allowed instruments and risk bounds.
 - Daily keep/discard experiment loop.
@@ -50,13 +50,26 @@ If no folder is needed, still create `data/traders/{name}/` and place one `trade
 ## Minimal Output Contract (Must Include)
 
 ```text
-1) Trader Name and Folder Path (`data/traders/{name}`)
-2) Trader execution target strategy path convention (`backend/strategies/{name}_strategy.py`)
+1) Trader ID and Folder Path (`data/traders/{id}`)
+2) Trader execution target strategy path convention (`backend/strategies/{id}_strategy.py`)
 3) Strategy class/interface requirements for execution phase
 4) Strategy-authoring protocol (how trader should design rules when executed)
 5) Risk policy constraints and forbidden actions
 6) Latest Keep/Discard Decision Summary
 ```
+
+## Required Final Line For Backend Parsing
+
+Always end the trainer run with exactly one line:
+
+```text
+FINAL_TRAITS_JSON: {"risk_appetite":"...","holding_horizon":"...","signal_preference":"...","position_construction":"...","exit_discipline":"...","universe_focus":"..."}
+```
+
+Rules:
+- Use valid JSON object syntax.
+- Keep it on a single line.
+- Do not append extra text to that line.
 
 ## Execution Note for AI Agents
 
