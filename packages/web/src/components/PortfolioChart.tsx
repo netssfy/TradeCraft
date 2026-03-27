@@ -51,10 +51,12 @@ export default function PortfolioChart({ portfolio, initialCash }: PortfolioChar
           />
           <Tooltip
             contentStyle={{
-              background: 'var(--bg-secondary)',
-              border: '1px solid var(--border-color)',
-              borderRadius: 6,
+              background: 'var(--card-bg)',
+              border: '1px solid var(--card-border)',
+              borderRadius: 10,
               fontSize: 12,
+              backdropFilter: 'blur(12px)',
+              WebkitBackdropFilter: 'blur(12px)',
             }}
             formatter={(value: number, name: string) => {
               if (name === 'returnPct') return [`${value.toFixed(2)}%`, '累计收益率'];
