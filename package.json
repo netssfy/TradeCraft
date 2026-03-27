@@ -1,0 +1,11 @@
+{
+  "name": "tradecraft",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w packages/web",
+    "build": "npm run build -w packages/web"
+  }
+}
