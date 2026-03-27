@@ -145,22 +145,53 @@ class TraderStore:
     # 持仓快照
     # ------------------------------------------------------------------
 
-    def save_portfolio(self, name: str, snapshot: Dict[str, Any]) -> str:
-        """写入 portfolio/latest.json，返回文件路径。"""
+    def _portfolio_path(self, name: str, mode: str) -> str:
+        return os.path.join(self.portfolio_dir(name), f"{mode}.json")
+
+    def append_portfolio_snapshot(self, name: str, mode: str, snapshot: Dict[str, Any]) -> str:
+        """将单日快照追加（或更新）到 portfolio/{mode}.json 数组中。
+
+        snapshot 必须包含 "date" 字段（YYYY-MM-DD）。
+        若同一 date 已存在则覆盖，否则追加。
+        返回文件路径。
+        """
         pdir = self.portfolio_dir(name)
         os.makedirs(pdir, exist_ok=True)
-        path = os.path.join(pdir, "latest.json")
+        path = self._portfolio_path(name, mode)
+
+        records: List[Dict[str, Any]] = []
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                records = json.load(f)
+
+        date = snapshot.get("date")
+        # 更新已有日期或追加
+        for i, rec in enumerate(records):
+            if rec.get("date") == date:
+                records[i] = snapshot
+                break
+        else:
+            records.append(snapshot)
+
         with open(path, "w", encoding="utf-8") as f:
-            json.dump(snapshot, f, ensure_ascii=False, indent=2)
+            json.dump(records, f, ensure_ascii=False, indent=2)
         return path
 
-    def load_portfolio(self, name: str) -> Optional[Dict[str, Any]]:
-        """读取最新持仓快照，不存在时返回 None。"""
-        path = os.path.join(self.portfolio_dir(name), "latest.json")
+    def load_portfolio(self, name: str, mode: str = "paper") -> Optional[List[Dict[str, Any]]]:
+        """读取 portfolio/{mode}.json，返回快照数组；文件不存在时返回 None。"""
+        path = self._portfolio_path(name, mode)
         if not os.path.exists(path):
             return None
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
+
+    def load_latest_portfolio(self, name: str) -> Optional[Dict[str, Any]]:
+        """从 paper.json 或 backtest.json 中取最新一条快照，用于恢复持仓。"""
+        for mode in ("paper", "backtest"):
+            records = self.load_portfolio(name, mode)
+            if records:
+                return records[-1]
+        return None
 
     # ------------------------------------------------------------------
     # 枚举所有 trader

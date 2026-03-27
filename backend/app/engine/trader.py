@@ -101,7 +101,7 @@ class Trader:
         )
 
         # 尝试从持仓快照恢复（paper 模式续跑时有用）
-        snapshot = store.load_portfolio(name)
+        snapshot = store.load_latest_portfolio(name)
         if snapshot is not None:
             cash = float(snapshot.get("cash", initial_cash))
         else:
@@ -152,10 +152,15 @@ class Trader:
         ]
         return store.save_trades(self.id, run_id, trades, mode)
 
-    def save_portfolio(self, store: "TraderStore") -> str:  # noqa: F821
-        """将当前持仓快照写入 portfolio/latest.json。"""
+    def save_portfolio(self, store: "TraderStore", mode: str = "paper", date: Optional[str] = None) -> str:  # noqa: F821
+        """将当前持仓快照追加到 portfolio/{mode}.json。
+
+        若提供 date（YYYY-MM-DD）则写入带日期的记录；否则用当前 UTC 日期。
+        """
+        from datetime import date as _date
+        record_date = date or _date.today().isoformat()
         snapshot = {
-            "trader_id": self.id,
+            "date": record_date,
             "cash": self.portfolio.cash,
             "positions": {
                 symbol: {
@@ -166,7 +171,7 @@ class Trader:
                 for symbol, pos in self.portfolio.positions.items()
             },
         }
-        return store.save_portfolio(self.id, snapshot)
+        return store.append_portfolio_snapshot(self.id, mode, snapshot)
 
     # ------------------------------------------------------------------
     # 运行时接口

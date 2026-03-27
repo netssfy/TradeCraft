@@ -53,6 +53,7 @@ class Engine:
         self.store = store or TraderStore()
 
         self._stop_flag: bool = False
+        self._saved_close_dates: set = set()  # 防止同一天重复保存 portfolio 快照
 
         # run_id: backtest 用时间戳+uuid，paper 用日期
         if mode == EngineMode.PAPER:
@@ -243,14 +244,37 @@ class Engine:
                         exc_info=True,
                     )
 
+        # 收盘时为所有 trader 保存带日期的 portfolio 快照（paper + backtest 均执行）
         # PAPER 模式：每 tick 实时落盘 portfolio 和 trades
         if self.mode == EngineMode.PAPER:
             for trader in self.traders:
                 try:
-                    trader.save_portfolio(self.store)
+                    close_date = _get_close_date(trader, bar_time)
+                    # 收盘快照去重：同一天只保存一次
+                    snap_key = f"{trader.id}:{close_date}" if close_date else None
+                    if snap_key and snap_key in self._saved_close_dates:
+                        close_date = None
+                    elif snap_key:
+                        self._saved_close_dates.add(snap_key)
+                    trader.save_portfolio(self.store, mode="paper", date=close_date)
                     trader.save_trades(self.store, self._run_id, mode="paper")
                 except Exception as exc:
                     logger.error("PAPER persist failed for trader '%s': %s", trader.id, exc)
+
+        # BACKTEST 模式：收盘时保存带日期的 portfolio 快照
+        elif self.mode == EngineMode.BACKTEST:
+            for trader in self.traders:
+                close_date = _get_close_date(trader, bar_time)
+                if close_date:
+                    snap_key = f"{trader.id}:{close_date}"
+                    if snap_key in self._saved_close_dates:
+                        continue
+                    self._saved_close_dates.add(snap_key)
+                    try:
+                        path = trader.save_portfolio(self.store, mode="backtest", date=close_date)
+                        logger.info("BACKTEST portfolio snapshot saved for trader '%s' date=%s → %s", trader.id, close_date, path)
+                    except Exception as exc:
+                        logger.error("BACKTEST portfolio snapshot failed for trader '%s': %s", trader.id, exc)
 
     def _run_loop(self) -> None:
         """主循环：BACKTEST 直接跳 Bar，PAPER 等待真实 1 分钟。"""
@@ -399,11 +423,10 @@ class Engine:
         """PAPER 模式：持久化所有 Trader 的 Portfolio 状态。"""
         for trader in self.traders:
             try:
-                path = trader.save_portfolio(self.store)
+                path = trader.save_portfolio(self.store, mode="paper")
                 logger.info("Portfolio persisted for trader '%s' → %s", trader.id, path)
             except Exception as exc:
                 logger.error("Failed to persist portfolio for trader '%s': %s", trader.id, exc)
-
     def _persist_trade_records(self) -> None:
         """持久化所有 Trader 的已成交记录。"""
         mode = "paper" if self.mode == EngineMode.PAPER else "backtest"
@@ -563,6 +586,19 @@ class Engine:
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+
+def _get_close_date(trader, bar_time: datetime) -> Optional[str]:
+    """若 bar_time 是该 trader 所在市场的收盘时刻，返回本地日期字符串（YYYY-MM-DD），否则返回 None。"""
+    from app.data.market import MARKET_INFO, is_market_close
+    if not is_market_close(trader.market, bar_time):
+        return None
+    info = MARKET_INFO[trader.market]
+    if info.timestamps_are_local:
+        return bar_time.replace(tzinfo=None).strftime("%Y-%m-%d")
+    else:
+        import zoneinfo
+        return bar_time.astimezone(zoneinfo.ZoneInfo(info.timezone)).strftime("%Y-%m-%d")
+
 
 def _bar_ts_utc(bar: Bar) -> datetime:
     """Return bar.timestamp as a UTC-aware datetime."""

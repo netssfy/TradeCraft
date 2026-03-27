@@ -2,7 +2,7 @@
 # Trader 配置已移至 data/traders/{name}/trader.json
 # 通过 CLI 或 REST API 创建 trader
 
-mode: paper
+mode: backtest
 
 bar_interval: 1m
 

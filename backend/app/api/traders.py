@@ -43,10 +43,16 @@ class PositionModel(BaseModel):
     avg_cost: float
 
 
-class PortfolioModel(BaseModel):
-    trader_id: str
+class PortfolioSnapshotModel(BaseModel):
+    date: str
     cash: float
     positions: Dict[str, PositionModel]
+
+
+class PortfolioModel(BaseModel):
+    trader_id: str
+    mode: str
+    snapshots: List[PortfolioSnapshotModel]
 
 
 class TradeModel(BaseModel):
@@ -266,17 +272,28 @@ def set_active_strategy(trader_id: str, filename: str):
     return _load_trader_info(trader_id)
 
 
-@router.get("/{trader_id}/portfolio", response_model=PortfolioModel, summary="Get portfolio snapshot")
-def get_portfolio(trader_id: str):
+@router.get(
+    "/{trader_id}/portfolio/{mode}",
+    response_model=PortfolioModel,
+    summary="Get portfolio history",
+    description="Returns all daily snapshots for the given mode (paper or backtest).",
+)
+def get_portfolio(trader_id: str, mode: str):
     _assert_exists(trader_id)
-    snapshot = store.load_portfolio(trader_id)
-    if snapshot is None:
-        raise HTTPException(status_code=404, detail="No portfolio snapshot.")
-    return PortfolioModel(
-        trader_id=snapshot["trader_id"],
-        cash=snapshot["cash"],
-        positions={sym: PositionModel(**pos) for sym, pos in snapshot.get("positions", {}).items()},
-    )
+    if mode not in ("paper", "backtest"):
+        raise HTTPException(status_code=400, detail="mode must be paper or backtest")
+    records = store.load_portfolio(trader_id, mode)
+    if records is None:
+        raise HTTPException(status_code=404, detail=f"No portfolio data for mode '{mode}'.")
+    snapshots = [
+        PortfolioSnapshotModel(
+            date=r["date"],
+            cash=r["cash"],
+            positions={sym: PositionModel(**pos) for sym, pos in r.get("positions", {}).items()},
+        )
+        for r in records
+    ]
+    return PortfolioModel(trader_id=trader_id, mode=mode, snapshots=snapshots)
 
 
 @router.get(

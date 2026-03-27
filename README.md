@@ -89,7 +89,8 @@
 │   │       │   ├── paper/
 │   │       │   └── backtest/
 │   │       └── portfolio/
-│   │           └── latest.json
+│   │           ├── paper.json      # 模拟盘每日收盘快照数组
+│   │           └── backtest.json   # 回测每日收盘快照数组
 │   ├── logs/
 │   └── runs/
 │
@@ -134,7 +135,7 @@ python server.py
 - `GET /traders/{trader_id}/strategy`：获取策略文件列表
 - `POST /traders/{trader_id}/strategy`：上传策略文件（`.py`）
 - `PUT /traders/{trader_id}/strategy/active?filename=...`：设置激活策略
-- `GET /traders/{trader_id}/portfolio`：获取最新持仓快照
+- `GET /traders/{trader_id}/portfolio/{mode}`：获取持仓历史快照（`mode` 为 `paper` 或 `backtest`），返回每日收盘时的 cash 和 positions 数组，可用于绘制收益率曲线或复盘
 - `GET /traders/{trader_id}/trades`：获取成交记录索引（paper/backtest）
 - `GET /traders/{trader_id}/trades/{mode}/{run_id}`：获取单次运行成交明细
 
