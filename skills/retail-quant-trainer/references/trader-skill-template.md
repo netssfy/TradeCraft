@@ -7,7 +7,7 @@ The trader artifact must instruct the executing agent to output strategy code co
 
 ## Trader Naming and Location (Required)
 
-- Save each trader under: `data/traders/{id}`
+- Save each trader under: `backend/data/traders/{id}`
 - `{id}` must be trait-based and short:
   - Include key style signals (for example: trend, meanrev, event)
   - Include risk flavor (for example: cons, bal, aggr)
@@ -22,7 +22,7 @@ The trader artifact must instruct the executing agent to output strategy code co
 Recommended structure:
 
 ```text
-data/traders/{id}/
+backend/data/traders/{id}/
   SKILL.md
   references/
     metrics.json
@@ -41,7 +41,7 @@ data/traders/{id}/
 
 ## Option B: Standalone Trader Prompt
 
-If no folder is needed, still create `data/traders/{id}/` and place one `trader_program.md` with:
+If no folder is needed, still create `backend/data/traders/{id}/` and place one `trader_program.md` with:
 - Objective and scope.
 - Allowed instruments and risk bounds.
 - Daily keep/discard experiment loop.
@@ -50,7 +50,7 @@ If no folder is needed, still create `data/traders/{id}/` and place one `trader_
 ## Minimal Output Contract (Must Include)
 
 ```text
-1) Trader ID and Folder Path (`data/traders/{id}`)
+1) Trader ID and Folder Path (`backend/data/traders/{id}`)
 2) Trader execution target strategy path convention (`backend/strategies/{id}_strategy.py`)
 3) Strategy class/interface requirements for execution phase
 4) Strategy-authoring protocol (how trader should design rules when executed)

@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import type { StrategyFile } from '@tradecraft/shared/types';
-import { api } from '../services/api';
+import { api, researchStrategySSE } from '../services/api';
 import LoadingSpinner from './LoadingSpinner';
 
 interface StrategyManagerProps {
@@ -13,7 +13,10 @@ export default function StrategyManager({ traderId, onUpdate }: StrategyManagerP
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [researching, setResearching] = useState(false);
+  const [logs, setLogs] = useState<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
+  const logsEndRef = useRef<HTMLDivElement>(null);
 
   const load = () => {
     setLoading(true);
@@ -62,13 +65,46 @@ export default function StrategyManager({ traderId, onUpdate }: StrategyManagerP
     }
   };
 
+  const handleResearch = async () => {
+    setResearching(true);
+    setLogs([]);
+    setError(null);
+    try {
+      await researchStrategySSE(traderId, {
+        onLog: (msg) => {
+          setLogs((prev) => [...prev, msg]);
+          setTimeout(() => logsEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+        },
+        onResult: () => {
+          load();
+          onUpdate();
+          setResearching(false);
+        },
+        onError: (msg) => {
+          setError(msg);
+          setResearching(false);
+        },
+      });
+    } catch (e: any) {
+      setError(e.message);
+      setResearching(false);
+    }
+  };
+
   if (loading) return <LoadingSpinner />;
 
   return (
     <div className="card">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <div className="label" style={{ margin: 0 }}>策略文件</div>
-        <div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            className="btn btn-primary"
+            onClick={handleResearch}
+            disabled={researching || uploading}
+          >
+            {researching ? '研究中...' : 'AI 研究策略'}
+          </button>
           <input
             ref={fileRef}
             type="file"
@@ -79,7 +115,7 @@ export default function StrategyManager({ traderId, onUpdate }: StrategyManagerP
           <button
             className="btn"
             onClick={() => fileRef.current?.click()}
-            disabled={uploading}
+            disabled={uploading || researching}
           >
             {uploading ? '上传中...' : '上传策略'}
           </button>
@@ -120,6 +156,30 @@ export default function StrategyManager({ traderId, onUpdate }: StrategyManagerP
               )}
             </div>
           ))}
+        </div>
+      )}
+
+      {logs.length > 0 && (
+        <div style={{ marginTop: 16, borderTop: '1px solid var(--border-color)', paddingTop: 12 }}>
+          <div className="label" style={{ marginBottom: 8 }}>AI 研究日志</div>
+          <div
+            style={{
+              maxHeight: 300,
+              overflow: 'auto',
+              fontFamily: 'var(--font-mono)',
+              fontSize: 12,
+              lineHeight: 1.6,
+              color: 'var(--text-secondary)',
+              background: 'var(--bg-primary)',
+              borderRadius: 8,
+              padding: 12,
+            }}
+          >
+            {logs.map((log, i) => (
+              <div key={i}>{log}</div>
+            ))}
+            <div ref={logsEndRef} />
+          </div>
         </div>
       )}
     </div>

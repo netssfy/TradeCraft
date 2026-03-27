@@ -1,6 +1,6 @@
 ---
 name: retail-quant-trainer
-description: Train AI stock traders for small-capital retail users with explainable, followable strategies and strict risk boundaries. Use when tasks involve designing trader personas across style dimensions, generating trader skill/prompt artifacts under data/traders/{id}, embedding Strategy interface implementation rules (backend/app/trading/strategy.py) into those artifacts, and returning machine-parseable final traits for backend create_trader processing.
+description: Train AI stock traders for small-capital retail users with explainable, followable strategies and strict risk boundaries. Use when tasks involve designing trader personas across style dimensions, generating trader skill/prompt artifacts under backend/data/traders/{id}, embedding Strategy interface implementation rules (backend/app/trading/strategy.py) into those artifacts, and returning machine-parseable final traits for backend create_trader processing.
 ---
 
 # Retail Quant Trainer
@@ -45,7 +45,7 @@ Treat the system as not:
 
 5. Package trained trader as executable artifact:
 - Read [references/trader-skill-template.md](references/trader-skill-template.md).
-- Persist trader artifacts under `data/traders/{id}`.
+- Persist trader artifacts under `backend/data/traders/{id}`.
 - Produce either:
   - A trader skill folder (`SKILL.md` + optional references), or
   - A standalone trader prompt (`trader_program.md`) that an AI agent can execute.
@@ -77,7 +77,7 @@ Treat the system as not:
 
 - Trader style card completed from dimensions.
 - Trader executable artifact produced (skill or prompt).
-- Trader folder path uses `data/traders/{id}` and id is concise, trait-based.
+- Trader folder path uses `backend/data/traders/{id}` and id is concise, trait-based.
 - Trader artifact clearly specifies how to implement Strategy-compatible code.
 - Final output includes valid one-line `FINAL_TRAITS_JSON` with six required traits fields.
 - Daily post-close review notes include data, findings, changes, and next-day watch points.

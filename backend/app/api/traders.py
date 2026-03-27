@@ -256,6 +256,24 @@ async def upload_strategy(trader_id: str, file: UploadFile = File(...)):
     return StrategyFileModel(filename=file.filename, is_active=(file.filename == active))
 
 
+@router.post(
+    "/{trader_id}/strategy/research",
+    status_code=200,
+    summary="Research strategy",
+    description="Invoke Codex to research and generate a trading strategy for the specified trader.",
+)
+def research_strategy(trader_id: str):
+    from app.engine.trader import research_strategy as _research
+
+    _assert_exists(trader_id)
+
+    def _stream():
+        for evt in _research(trader_id, store):
+            yield _sse_event(evt["event"], {k: v for k, v in evt.items() if k != "event"})
+
+    return StreamingResponse(_stream(), media_type="text/event-stream")
+
+
 @router.put(
     "/{trader_id}/strategy/active",
     response_model=TraderInfo,

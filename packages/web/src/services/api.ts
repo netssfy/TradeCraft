@@ -75,6 +75,12 @@ export interface SSECallbacks {
   onError?: (message: string) => void;
 }
 
+export interface ResearchSSECallbacks {
+  onLog?: (message: string) => void;
+  onResult?: (data: { trader_id: string; strategies: string[] }) => void;
+  onError?: (message: string) => void;
+}
+
 export async function createTraderSSE(
   data: CreateTraderRequest,
   callbacks: SSECallbacks
@@ -89,6 +95,54 @@ export async function createTraderSSE(
     if (res.status === 409) {
       throw new Error('交易员 ID 已存在');
     }
+    const body = await res.text();
+    throw new Error(`${res.status}: ${body}`);
+  }
+
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error('无法读取响应流');
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    let currentEvent = '';
+    for (const line of lines) {
+      if (line.startsWith('event: ')) {
+        currentEvent = line.slice(7).trim();
+      } else if (line.startsWith('data: ')) {
+        const data = line.slice(6);
+        try {
+          const payload = JSON.parse(data);
+          if (currentEvent === 'log' && callbacks.onLog) {
+            callbacks.onLog(payload.message);
+          } else if (currentEvent === 'result' && callbacks.onResult) {
+            callbacks.onResult(payload);
+          } else if (currentEvent === 'error' && callbacks.onError) {
+            callbacks.onError(payload.message);
+          }
+        } catch {}
+      }
+    }
+  }
+}
+
+export async function researchStrategySSE(
+  traderId: string,
+  callbacks: ResearchSSECallbacks
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/traders/${traderId}/strategy/research`, {
+    method: 'POST',
+  });
+
+  if (!res.ok) {
     const body = await res.text();
     throw new Error(`${res.status}: ${body}`);
   }

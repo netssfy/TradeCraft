@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import json
 import logging
-from typing import TYPE_CHECKING, List, Optional
+import os
+import subprocess
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Dict, Generator, List, Optional
 
 from app.data.market import Market
 from app.data.repository import MarketRepository
@@ -12,6 +16,7 @@ from app.engine.portfolio import Portfolio
 
 if TYPE_CHECKING:
     from app.adapters.simulator import Simulator
+    from app.engine.trader_store import TraderStore
     from app.trading.strategy import Strategy
 
 logger = logging.getLogger(__name__)
@@ -206,3 +211,106 @@ class Trader:
             if fill is not None:
                 self.order_manager.process_fill(fill)
                 self.portfolio.update_on_fill(fill)
+
+
+# ------------------------------------------------------------------
+# Strategy research (Codex)
+# ------------------------------------------------------------------
+
+def _codex_cmd() -> List[str]:
+    repo_root = Path(__file__).resolve().parents[3]
+    return [
+        "codex.cmd",
+        "exec",
+        "-C",
+        str(repo_root),
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--sandbox",
+        "danger-full-access",
+        "-",
+    ]
+
+
+def _research_prompt(info: Dict[str, Any], store: "TraderStore") -> str:
+    repo_root = Path(__file__).resolve().parents[3]
+    skill_path = (repo_root / "skills" / "retail-quant-trainer" / "SKILL.md").as_posix()
+    strategy_contract = (repo_root / "backend" / "app" / "trading" / "strategy.py").as_posix()
+    trader_id = info["id"]
+    traits = info.get("traits", {})
+    traits_str = ", ".join(f"{k}={v}" for k, v in traits.items())
+    sdir = store.strategy_dir(trader_id)
+    existing: List[str] = []
+    if os.path.isdir(sdir):
+        existing = sorted(f for f in os.listdir(sdir) if f.endswith(".py"))
+    existing_str = ", ".join(existing) if existing else "(none)"
+    return (
+        f"Use [$retail-quant-trainer]({skill_path}). "
+        f"You are researching a trading strategy for existing trader '{trader_id}'. "
+        f"Market: {info['market']}. "
+        f"Allowed symbols: {', '.join(info['allowed_symbols'])}. "
+        f"Commission rate: {info['commission_rate']}. "
+        f"Trader traits: {traits_str}. "
+        f"Existing strategy files: {existing_str}. "
+        f"Strategy interface contract: {strategy_contract}. "
+        "Follow the autoresearch daily loop: generate candidate variants, evaluate, keep or discard with rationale. "
+        "Implement the final accepted variant as a Python file in the trader strategy directory "
+        f"({sdir}/). "
+        f"The file must import and subclass Strategy from {strategy_contract}. "
+        f"Implement initialize and on_bar methods. "
+        "Keep logic explainable, enforce risk constraints from trader traits. "
+        "Do not call backend API directly. "
+        "Produce strategy code artifacts only. "
+    )
+
+
+def research_strategy(
+    trader_id: str,
+    store: "TraderStore",
+) -> Generator[Dict[str, Any], None, None]:
+    """调用 Codex 为指定交易员研究并生成交易策略。
+
+    Yields 事件字典：
+      - {"event": "log",    "message": str}
+      - {"event": "error",  "message": str}
+      - {"event": "result", "strategies": list[str]}
+    """
+    info = store.load_info(trader_id)
+
+    yield {"event": "log", "message": f"Starting strategy research for trader '{trader_id}'..."}
+
+    try:
+        process = subprocess.Popen(
+            _codex_cmd(),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+        )
+    except Exception as exc:
+        yield {"event": "error", "message": f"Failed to start Codex: {exc}"}
+        return
+
+    prompt = _research_prompt(info, store)
+    assert process.stdin is not None
+    process.stdin.write(prompt)
+    process.stdin.close()
+
+    assert process.stdout is not None
+    for raw in process.stdout:
+        line = raw.rstrip("\r\n")
+        yield {"event": "log", "message": line}
+
+    return_code = process.wait()
+    if return_code != 0:
+        yield {"event": "error", "message": f"Codex exited with status {return_code}"}
+        return
+
+    sdir = store.strategy_dir(trader_id)
+    files: List[str] = []
+    if os.path.isdir(sdir):
+        files = sorted(f for f in os.listdir(sdir) if f.endswith(".py"))
+
+    yield {"event": "result", "strategies": files}
