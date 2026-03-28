@@ -233,9 +233,12 @@ def _codex_cmd() -> List[str]:
 
 def _research_prompt(info: Dict[str, Any], store: "TraderStore") -> str:
     repo_root = Path(__file__).resolve().parents[3]
-    skill_path = (repo_root / "skills" / "retail-quant-trainer" / "SKILL.md").as_posix()
     strategy_contract = (repo_root / "backend" / "app" / "trading" / "strategy.py").as_posix()
     trader_id = info["id"]
+    trader_skill_path = Path(store.trader_dir(trader_id)) / "SKILL.md"
+    if not trader_skill_path.is_file():
+        raise ValueError(f"Trader skill not found: {trader_skill_path.as_posix()}")
+
     traits = info.get("traits", {})
     traits_str = ", ".join(f"{k}={v}" for k, v in traits.items())
     sdir = store.strategy_dir(trader_id)
@@ -244,7 +247,7 @@ def _research_prompt(info: Dict[str, Any], store: "TraderStore") -> str:
         existing = sorted(f for f in os.listdir(sdir) if f.endswith(".py"))
     existing_str = ", ".join(existing) if existing else "(none)"
     return (
-        f"Use [$retail-quant-trainer]({skill_path}). "
+        f"Use [{trader_id} skill]({trader_skill_path.as_posix()}). "
         f"You are researching a trading strategy for existing trader '{trader_id}'. "
         f"Market: {info['market']}. "
         f"Allowed symbols: {', '.join(info['allowed_symbols'])}. "

@@ -8,7 +8,7 @@ import type {
   UpdateTraderRequest,
 } from '@tradecraft/shared/types';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api';
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
@@ -67,6 +67,12 @@ export const api = {
 
   getTrades: (id: string, mode: string, runId: string) =>
     request<Trade[]>(`/traders/${id}/trades/${mode}/${runId}`),
+
+  runBacktest: (id: string, range?: { start_date?: string; end_date?: string }) =>
+    request<{ trader_id: string; run_id: string }>(`/traders/${id}/backtest/run`, {
+      method: 'POST',
+      body: JSON.stringify(range ?? {}),
+    }),
 };
 
 export interface SSECallbacks {

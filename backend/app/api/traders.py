@@ -4,6 +4,7 @@ import json
 import os
 import re
 import subprocess
+from datetime import date
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -67,6 +68,16 @@ class TradeModel(BaseModel):
 class StrategyFileModel(BaseModel):
     filename: str
     is_active: bool
+
+
+class BacktestRunResult(BaseModel):
+    trader_id: str
+    run_id: str
+
+
+class BacktestRunRequest(BaseModel):
+    start_date: Optional[str] = Field(None, description="Backtest start date (YYYY-MM-DD)")
+    end_date: Optional[str] = Field(None, description="Backtest end date (YYYY-MM-DD)")
 
 
 class CreateTraderRequest(BaseModel):
@@ -342,6 +353,80 @@ def get_trades(trader_id: str, mode: str, run_id: str):
     return [TradeModel(**t) for t in trades]
 
 
+@router.post(
+    "/{trader_id}/backtest/run",
+    response_model=BacktestRunResult,
+    summary="Run one backtest for a trader",
+)
+def run_backtest_once(trader_id: str, req: BacktestRunRequest):
+    from app.adapters.data_feed import AkshareDataFeed, BaostockDataFeed, YfinanceDataFeed
+    from app.adapters.simulator import Simulator
+    from app.core.config import load_config
+    from app.data.repository import MarketRepository
+    from app.engine.core import Engine, EngineMode
+    from app.engine.trader import Trader
+
+    _assert_exists(trader_id)
+
+    today = date.today()
+    default_start = _subtract_months(today, 3)
+    start_date_raw = req.start_date or default_start.isoformat()
+    end_date_raw = req.end_date or today.isoformat()
+
+    try:
+        start_date = date.fromisoformat(start_date_raw)
+        end_date = date.fromisoformat(end_date_raw)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="start_date/end_date must be YYYY-MM-DD")
+
+    if start_date > end_date:
+        raise HTTPException(status_code=400, detail="start_date must be <= end_date")
+
+    config = load_config("config.yaml")
+    config.mode = "backtest"
+    config.backtest.start_date = start_date.isoformat()
+    config.backtest.end_date = end_date.isoformat()
+
+    repository = MarketRepository()
+    simulator = Simulator(commission_rate=0.0003)
+    trader = Trader.from_dir(trader_id, store, repository, simulator)
+
+    feed_cls_map = {
+        "akshare": AkshareDataFeed,
+        "baostock": BaostockDataFeed,
+        "yfinance": YfinanceDataFeed,
+    }
+    feed_name = config.data_sources.get(trader.market.value, "yfinance").lower()
+    feed_cls = feed_cls_map.get(feed_name)
+    if feed_cls is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown data source '{feed_name}' for market '{trader.market.value}'.",
+        )
+
+    engine = Engine(
+        mode=EngineMode.BACKTEST,
+        traders=[trader],
+        repository=repository,
+        simulator=simulator,
+        data_feeds=[feed_cls()],
+        config=config,
+        store=store,
+    )
+
+    try:
+        engine.start()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Backtest failed: {exc}")
+
+    # Ensure trade run metadata exists even when there are no fills.
+    trader.save_trades(store, engine._run_id, mode="backtest")
+
+    return BacktestRunResult(trader_id=trader_id, run_id=engine._run_id)
+
+
 def _assert_exists(trader_id: str):
     if trader_id not in store.list_traders():
         raise HTTPException(status_code=404, detail=f"Trader '{trader_id}' not found.")
@@ -363,6 +448,25 @@ def _load_trader_info(trader_id: str) -> TraderInfo:
 
 def _sse_event(event: str, payload: Dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def _subtract_months(d: date, months: int) -> date:
+    year = d.year
+    month = d.month - months
+    while month <= 0:
+        month += 12
+        year -= 1
+    day = min(d.day, _days_in_month(year, month))
+    return date(year, month, day)
+
+
+def _days_in_month(year: int, month: int) -> int:
+    if month == 2:
+        is_leap = (year % 4 == 0 and year % 100 != 0) or (year % 400 == 0)
+        return 29 if is_leap else 28
+    if month in (4, 6, 9, 11):
+        return 30
+    return 31
 
 
 def _build_codex_cmd() -> List[str]:

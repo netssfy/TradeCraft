@@ -1,37 +1,62 @@
 import { useEffect, useState } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
-import type { Trader, Portfolio, Trade, TradeRuns } from '@tradecraft/shared/types';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import type { Portfolio, Trade, TradeRuns, Trader } from '@tradecraft/shared/types';
 import { TRAIT_LABELS, formatCurrency } from '@tradecraft/shared/utils';
-import { api } from '../services/api';
-import LoadingSpinner from '../components/LoadingSpinner';
+import EditTraderModal from '../components/EditTraderModal';
 import ErrorMessage from '../components/ErrorMessage';
+import LoadingSpinner from '../components/LoadingSpinner';
 import PortfolioChart from '../components/PortfolioChart';
 import StrategyManager from '../components/StrategyManager';
-import EditTraderModal from '../components/EditTraderModal';
+import { api } from '../services/api';
 
 export default function TraderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+
   const [trader, setTrader] = useState<Trader | null>(null);
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
   const [tradeRuns, setTradeRuns] = useState<TradeRuns | null>(null);
   const [selectedRun, setSelectedRun] = useState<{ mode: string; runId: string } | null>(null);
   const [trades, setTrades] = useState<Trade[] | null>(null);
+
   const [mode, setMode] = useState<'paper' | 'backtest'>('paper');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [portfolioError, setPortfolioError] = useState<string | null>(null);
+
   const [showEdit, setShowEdit] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [runningBacktest, setRunningBacktest] = useState(false);
+
+  const [showBacktestConfig, setShowBacktestConfig] = useState(false);
+  const [backtestStartDate, setBacktestStartDate] = useState('');
+  const [backtestEndDate, setBacktestEndDate] = useState('');
+
+  const formatDateInput = (d: Date) => d.toISOString().slice(0, 10);
+
+  const getDefaultBacktestRange = () => {
+    const end = new Date();
+    const start = new Date(end);
+    start.setMonth(start.getMonth() - 3);
+    return {
+      start: formatDateInput(start),
+      end: formatDateInput(end),
+    };
+  };
+
+  const openBacktestConfig = () => {
+    const range = getDefaultBacktestRange();
+    setBacktestStartDate(range.start);
+    setBacktestEndDate(range.end);
+    setShowBacktestConfig(true);
+  };
 
   useEffect(() => {
     if (!id) return;
     setLoading(true);
     setError(null);
-    Promise.all([
-      api.getTrader(id),
-      api.listTradeRuns(id),
-    ])
+
+    Promise.all([api.getTrader(id), api.listTradeRuns(id)])
       .then(([t, runs]) => {
         setTrader(t);
         setTradeRuns(runs);
@@ -44,6 +69,7 @@ export default function TraderDetailPage() {
     if (!id) return;
     setPortfolioError(null);
     setPortfolio(null);
+
     api
       .getPortfolio(id, mode)
       .then(setPortfolio)
@@ -63,7 +89,7 @@ export default function TraderDetailPage() {
     try {
       const t = await api.getTrades(id, m, runId);
       setTrades(t);
-    } catch (e: any) {
+    } catch {
       setTrades([]);
     }
   };
@@ -80,24 +106,72 @@ export default function TraderDetailPage() {
     }
   };
 
+  const handleRunBacktest = async (startDate: string, endDate: string) => {
+    if (!id) return;
+    if (startDate > endDate) {
+      setError('回测开始日期不能晚于结束日期');
+      return;
+    }
+
+    setRunningBacktest(true);
+    setError(null);
+
+    try {
+      const result = await api.runBacktest(id, {
+        start_date: startDate,
+        end_date: endDate,
+      });
+
+      const runs = await api.listTradeRuns(id);
+      setTradeRuns(runs);
+      setSelectedRun({ mode: 'backtest', runId: result.run_id });
+
+      const backtestTrades = await api.getTrades(id, 'backtest', result.run_id);
+      setTrades(backtestTrades);
+
+      const p = await api.getPortfolio(id, 'backtest');
+      setPortfolio(p);
+      setPortfolioError(null);
+      setMode('backtest');
+      setShowBacktestConfig(false);
+    } catch (e: any) {
+      setError(`启动回测失败: ${e.message}`);
+    } finally {
+      setRunningBacktest(false);
+    }
+  };
+
   if (loading) return <LoadingSpinner />;
-  if (error) return (
-    <div>
-      <ErrorMessage message={error} />
-      <Link to="/" className="btn" style={{ marginTop: 16 }}>返回列表</Link>
-    </div>
-  );
+
+  if (error) {
+    return (
+      <div>
+        <ErrorMessage message={error} />
+        <Link to="/" className="btn" style={{ marginTop: 16 }}>
+          返回列表
+        </Link>
+      </div>
+    );
+  }
+
   if (!trader) return null;
 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
         <div>
-          <Link to="/" style={{ color: 'var(--text-muted)', fontSize: 13 }}>← 返回列表</Link>
+          <Link to="/" style={{ color: 'var(--text-muted)', fontSize: 13 }}>
+            ← 返回列表
+          </Link>
           <h1 style={{ fontSize: 24, fontWeight: 600, marginTop: 8 }}>{trader.id}</h1>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn" onClick={() => setShowEdit(true)}>编辑</button>
+          <button className="btn btn-primary" onClick={openBacktestConfig} disabled={runningBacktest}>
+            {runningBacktest ? '回测中...' : '启动回测'}
+          </button>
+          <button className="btn" onClick={() => setShowEdit(true)}>
+            编辑
+          </button>
           <button className="btn btn-danger" onClick={handleDelete} disabled={deleting}>
             {deleting ? '删除中...' : '删除'}
           </button>
@@ -110,7 +184,9 @@ export default function TraderDetailPage() {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 8 }}>
             <div>
               <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>市场</span>
-              <div><span className="badge badge-yellow">{trader.market}</span></div>
+              <div>
+                <span className="badge badge-yellow">{trader.market}</span>
+              </div>
             </div>
             <div>
               <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>初始资金</span>
@@ -132,9 +208,7 @@ export default function TraderDetailPage() {
           <div style={{ marginTop: 8 }}>
             {Object.entries(trader.traits).map(([key, value]) => (
               <div key={key} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border-color)' }}>
-                <span style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
-                  {TRAIT_LABELS[key] || key}
-                </span>
+                <span style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{TRAIT_LABELS[key] || key}</span>
                 <span style={{ fontSize: 13 }}>{value}</span>
               </div>
             ))}
@@ -144,24 +218,19 @@ export default function TraderDetailPage() {
 
       <div className="card" style={{ marginBottom: 24 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <div className="label" style={{ margin: 0 }}>收益率曲线</div>
+          <div className="label" style={{ margin: 0 }}>
+            收益曲线
+          </div>
           <div style={{ display: 'flex', gap: 4 }}>
-            <button
-              className={`btn ${mode === 'paper' ? 'btn-primary' : ''}`}
-              onClick={() => setMode('paper')}
-              style={{ padding: '4px 12px', fontSize: 12 }}
-            >
+            <button className={`btn ${mode === 'paper' ? 'btn-primary' : ''}`} onClick={() => setMode('paper')} style={{ padding: '4px 12px', fontSize: 12 }}>
               模拟盘
             </button>
-            <button
-              className={`btn ${mode === 'backtest' ? 'btn-primary' : ''}`}
-              onClick={() => setMode('backtest')}
-              style={{ padding: '4px 12px', fontSize: 12 }}
-            >
+            <button className={`btn ${mode === 'backtest' ? 'btn-primary' : ''}`} onClick={() => setMode('backtest')} style={{ padding: '4px 12px', fontSize: 12 }}>
               回测
             </button>
           </div>
         </div>
+
         {portfolioError ? (
           <div style={{ color: 'var(--text-muted)', padding: 20, textAlign: 'center' }}>{portfolioError}</div>
         ) : portfolio ? (
@@ -187,13 +256,11 @@ export default function TraderDetailPage() {
                 {portfolio.snapshots.slice().reverse().map((snap) => (
                   <tr key={snap.date} style={{ borderBottom: '1px solid var(--border-color)' }}>
                     <td className="mono" style={{ padding: '8px 12px' }}>{snap.date}</td>
-                    <td className="mono" style={{ padding: '8px 12px', textAlign: 'right' }}>
-                      ¥{formatCurrency(snap.cash)}
-                    </td>
+                    <td className="mono" style={{ padding: '8px 12px', textAlign: 'right' }}>¥{formatCurrency(snap.cash)}</td>
                     <td style={{ padding: '8px 12px' }}>
                       {Object.entries(snap.positions).map(([sym, pos]) => (
                         <span key={sym} style={{ marginRight: 12 }}>
-                          {sym}: <span className="mono">{pos.quantity}</span>股 @<span className="mono">¥{formatCurrency(pos.avg_cost)}</span>
+                          {sym}: <span className="mono">{pos.quantity}</span> 股 @ <span className="mono">¥{formatCurrency(pos.avg_cost)}</span>
                         </span>
                       ))}
                       {Object.keys(snap.positions).length === 0 && <span style={{ color: 'var(--text-muted)' }}>空仓</span>}
@@ -204,9 +271,7 @@ export default function TraderDetailPage() {
             </table>
           </div>
         ) : (
-          <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 20 }}>
-            {portfolioError || '暂无持仓数据'}
-          </div>
+          <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 20 }}>{portfolioError || '暂无持仓数据'}</div>
         )}
       </div>
 
@@ -232,6 +297,7 @@ export default function TraderDetailPage() {
                   </div>
                 </div>
               )}
+
               {tradeRuns.backtest.length > 0 && (
                 <div>
                   <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>回测</div>
@@ -283,6 +349,7 @@ export default function TraderDetailPage() {
                 </table>
               </div>
             )}
+
             {trades && trades.length === 0 && (
               <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 20 }}>该运行无成交记录</div>
             )}
@@ -292,9 +359,43 @@ export default function TraderDetailPage() {
         )}
       </div>
 
-      <StrategyManager traderId={trader.id} onUpdate={() => {
-        api.getTrader(trader.id).then(setTrader);
-      }} />
+      {showBacktestConfig && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.35)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+          }}
+        >
+          <div className="card" style={{ width: '100%', maxWidth: 420 }}>
+            <div className="label" style={{ marginBottom: 12 }}>启动回测</div>
+            <div style={{ display: 'grid', gap: 12 }}>
+              <label style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                开始日期
+                <input type="date" value={backtestStartDate} onChange={(e) => setBacktestStartDate(e.target.value)} style={{ width: '100%', marginTop: 6 }} />
+              </label>
+              <label style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                结束日期
+                <input type="date" value={backtestEndDate} onChange={(e) => setBacktestEndDate(e.target.value)} style={{ width: '100%', marginTop: 6 }} />
+              </label>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+              <button className="btn" onClick={() => setShowBacktestConfig(false)} disabled={runningBacktest}>
+                取消
+              </button>
+              <button className="btn btn-primary" onClick={() => handleRunBacktest(backtestStartDate, backtestEndDate)} disabled={runningBacktest}>
+                {runningBacktest ? '回测中...' : '确认并启动'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <StrategyManager traderId={trader.id} onUpdate={() => api.getTrader(trader.id).then(setTrader)} />
 
       {showEdit && (
         <EditTraderModal

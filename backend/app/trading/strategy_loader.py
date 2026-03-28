@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import inspect
 import os
+import sys
 from dataclasses import dataclass
 from typing import List
 
@@ -26,7 +27,11 @@ class StrategyLoader:
         try:
             module_name = os.path.splitext(os.path.basename(file_path))[0]
             spec = importlib.util.spec_from_file_location(module_name, file_path)
+            if spec is None or spec.loader is None:
+                return LoadResult(success=False, strategy=None, error=f"鏃犳硶鍔犺浇妯″潡: {file_path}")
             module = importlib.util.module_from_spec(spec)
+            # Required by decorators like @dataclass during dynamic import.
+            sys.modules[module_name] = module
             spec.loader.exec_module(module)
         except SyntaxError as e:
             return LoadResult(success=False, strategy=None, error=f"语法错误: {e}")

@@ -1,6 +1,7 @@
-import { useState, useRef } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { CreateTraderRequest } from '@tradecraft/shared/types';
+import StreamMessagePanel, { type StreamMessage, type StreamMessageType } from '../components/StreamMessagePanel';
 import { createTraderSSE } from '../services/api';
 
 interface FormErrors {
@@ -9,8 +10,24 @@ interface FormErrors {
   allowed_symbols?: string;
 }
 
+function inferMessageType(message: string): StreamMessageType {
+  const text = message.toLowerCase();
+  if (text.includes('error') || text.includes('failed') || text.includes('exception') || text.includes('traceback')) {
+    return 'error';
+  }
+  if (text.includes('warn') || text.includes('warning')) {
+    return 'warning';
+  }
+  if (text.includes('result') || text.includes('success') || text.includes('completed') || text.includes('done')) {
+    return 'result';
+  }
+  return 'info';
+}
+
 export default function CreateTraderPage() {
   const navigate = useNavigate();
+  const nextMessageIdRef = useRef(1);
+
   const [form, setForm] = useState<CreateTraderRequest>({
     id: '',
     market: 'CN',
@@ -22,31 +39,70 @@ export default function CreateTraderPage() {
   const [symbolInput, setSymbolInput] = useState('');
   const [errors, setErrors] = useState<FormErrors>({});
   const [submitting, setSubmitting] = useState(false);
-  const [logs, setLogs] = useState<string[]>([]);
+  const [messages, setMessages] = useState<StreamMessage[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const logsEndRef = useRef<HTMLDivElement>(null);
+
+  const appendMessage = (type: StreamMessageType, text: string) => {
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: nextMessageIdRef.current++,
+        type,
+        text,
+      },
+    ]);
+  };
+
+  const appendLogLine = (text: string) => {
+    const type = inferMessageType(text);
+    if (type !== 'info') {
+      appendMessage(type, text);
+      return;
+    }
+
+    setMessages((prev) => {
+      const last = prev[prev.length - 1];
+      if (last && last.type === 'info' && last.text.length < 4000) {
+        return [
+          ...prev.slice(0, -1),
+          {
+            ...last,
+            text: `${last.text}\n${text}`,
+          },
+        ];
+      }
+      return [
+        ...prev,
+        {
+          id: nextMessageIdRef.current++,
+          type: 'info',
+          text,
+        },
+      ];
+    });
+  };
 
   const validate = (): boolean => {
     const newErrors: FormErrors = {};
-    if (!form.id.trim()) newErrors.id = '交易员 ID 不能为空';
-    if (form.initial_cash <= 0) newErrors.initial_cash = '初始资金必须大于 0';
-    if (form.allowed_symbols.length === 0) newErrors.allowed_symbols = '至少选择一个允许标的';
+    if (!form.id.trim()) newErrors.id = 'Trader ID is required';
+    if (form.initial_cash <= 0) newErrors.initial_cash = 'Initial cash must be greater than 0';
+    if (form.allowed_symbols.length === 0) newErrors.allowed_symbols = 'Add at least one symbol';
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
   const addSymbol = () => {
-    const sym = symbolInput.trim().toUpperCase();
-    if (sym && !form.allowed_symbols.includes(sym)) {
-      setForm((f) => ({ ...f, allowed_symbols: [...f.allowed_symbols, sym] }));
+    const symbol = symbolInput.trim().toUpperCase();
+    if (symbol && !form.allowed_symbols.includes(symbol)) {
+      setForm((f) => ({ ...f, allowed_symbols: [...f.allowed_symbols, symbol] }));
       setSymbolInput('');
     }
   };
 
-  const removeSymbol = (sym: string) => {
+  const removeSymbol = (symbol: string) => {
     setForm((f) => ({
       ...f,
-      allowed_symbols: form.allowed_symbols.filter((s) => s !== sym),
+      allowed_symbols: f.allowed_symbols.filter((s) => s !== symbol),
     }));
   };
 
@@ -55,42 +111,43 @@ export default function CreateTraderPage() {
     if (!validate()) return;
 
     setSubmitting(true);
-    setLogs([]);
+    setMessages([]);
     setError(null);
 
     try {
       await createTraderSSE(form, {
-        onLog: (msg) => {
-          setLogs((prev) => [...prev, msg]);
-          setTimeout(() => logsEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
-        },
+        onLog: (msg) => appendLogLine(msg),
         onResult: (trader) => {
+          appendMessage('result', `Trader created: ${trader.id}`);
           navigate(`/traders/${trader.id}`);
         },
         onError: (msg) => {
+          appendMessage('error', msg);
           setError(msg);
           setSubmitting(false);
         },
       });
     } catch (e: any) {
-      if (e.message.includes('已存在')) {
-        setError('交易员 ID 已存在');
-      } else {
-        setError(e.message);
-      }
+      const msg = e?.message || 'Failed to create trader';
+      appendMessage('error', msg);
+      setError(msg);
       setSubmitting(false);
     }
   };
 
   return (
-    <div style={{ maxWidth: 640 }}>
-      <h1 style={{ fontSize: 24, fontWeight: 600, marginBottom: 24 }}>创建交易员</h1>
+    <div style={{ maxWidth: 760 }}>
+      <h1 style={{ fontSize: 24, fontWeight: 600, marginBottom: 24 }}>Create Trader</h1>
 
-      {error && <div className="error-message" style={{ marginBottom: 16 }}>{error}</div>}
+      {error && (
+        <div className="error-message" style={{ marginBottom: 16 }}>
+          {error}
+        </div>
+      )}
 
       <form onSubmit={handleSubmit}>
         <div className="form-group">
-          <label className="label">交易员 ID *</label>
+          <label className="label">Trader ID *</label>
           <input
             className="input"
             value={form.id}
@@ -102,21 +159,21 @@ export default function CreateTraderPage() {
         </div>
 
         <div className="form-group">
-          <label className="label">市场</label>
+          <label className="label">Market</label>
           <select
             className="input"
             value={form.market}
             onChange={(e) => setForm((f) => ({ ...f, market: e.target.value }))}
             disabled={submitting}
           >
-            <option value="CN">CN (A股)</option>
-            <option value="HK">HK (港股)</option>
-            <option value="US">US (美股)</option>
+            <option value="CN">CN</option>
+            <option value="HK">HK</option>
+            <option value="US">US</option>
           </select>
         </div>
 
         <div className="form-group">
-          <label className="label">初始资金 *</label>
+          <label className="label">Initial Cash *</label>
           <input
             className="input mono"
             type="number"
@@ -128,35 +185,29 @@ export default function CreateTraderPage() {
         </div>
 
         <div className="form-group">
-          <label className="label">允许标的 *</label>
+          <label className="label">Allowed Symbols *</label>
           <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
             <input
               className="input"
               value={symbolInput}
               onChange={(e) => setSymbolInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addSymbol())}
-              placeholder="输入股票代码，回车添加"
+              placeholder="Type symbol and press Enter"
               disabled={submitting}
             />
             <button type="button" className="btn" onClick={addSymbol} disabled={submitting}>
-              添加
+              Add
             </button>
           </div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {form.allowed_symbols.map((sym) => (
+            {form.allowed_symbols.map((symbol) => (
               <span
-                key={sym}
+                key={symbol}
                 className="badge"
-                style={{
-                  background: 'var(--bg-tertiary)',
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 4,
-                }}
-                onClick={() => !submitting && removeSymbol(sym)}
+                style={{ background: 'var(--bg-tertiary)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                onClick={() => !submitting && removeSymbol(symbol)}
               >
-                {sym} ×
+                {symbol} x
               </span>
             ))}
           </div>
@@ -164,7 +215,7 @@ export default function CreateTraderPage() {
         </div>
 
         <div className="form-group">
-          <label className="label">手续费率</label>
+          <label className="label">Commission Rate</label>
           <input
             className="input mono"
             type="number"
@@ -176,7 +227,7 @@ export default function CreateTraderPage() {
         </div>
 
         <div className="form-group">
-          <label className="label">订单超时（秒）</label>
+          <label className="label">Order Timeout (seconds)</label>
           <input
             className="input mono"
             type="number"
@@ -187,30 +238,11 @@ export default function CreateTraderPage() {
         </div>
 
         <button type="submit" className="btn btn-primary" disabled={submitting}>
-          {submitting ? '创建中...' : '创建交易员'}
+          {submitting ? 'Creating...' : 'Create Trader'}
         </button>
       </form>
 
-      {logs.length > 0 && (
-        <div className="card" style={{ marginTop: 24 }}>
-          <div className="label" style={{ marginBottom: 8 }}>AI 训练日志</div>
-          <div
-            style={{
-              maxHeight: 300,
-              overflow: 'auto',
-              fontFamily: 'var(--font-mono)',
-              fontSize: 12,
-              lineHeight: 1.6,
-              color: 'var(--text-secondary)',
-            }}
-          >
-            {logs.map((log, i) => (
-              <div key={i}>{log}</div>
-            ))}
-            <div ref={logsEndRef} />
-          </div>
-        </div>
-      )}
+      <StreamMessagePanel title="Create Stream Messages" messages={messages} />
     </div>
   );
 }
