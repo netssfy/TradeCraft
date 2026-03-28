@@ -22,6 +22,7 @@ TradeCraft/
 │  │        ├─ portfolio/
 │  │        ├─ references/
 │  │        ├─ strategy/
+│  │        ├─ research/
 │  │        └─ trades/
 │  │           ├─ backtest/
 │  │           └─ paper/

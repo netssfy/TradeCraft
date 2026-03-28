@@ -3,8 +3,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, List, Optional
 
-import pandas as pd
-
 from app.data.market import BarInterval
 from app.data.repository import MarketRepository
 from app.engine.models import Bar, Order, OrderType
@@ -97,8 +95,8 @@ class Context:
         else:
             end = self._current_time.astimezone(timezone.utc)
 
-        # Use a far-past start to retrieve all available history up to current_time
-        start = pd.Timestamp.min.to_pydatetime().replace(tzinfo=timezone.utc)
+        # Use a far-past UTC datetime without pandas nanosecond conversion warnings.
+        start = datetime(1900, 1, 1, tzinfo=timezone.utc)
 
         bars = self._repository.read(
             symbol=symbol,

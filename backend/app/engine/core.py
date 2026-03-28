@@ -271,7 +271,12 @@ class Engine:
                         continue
                     self._saved_close_dates.add(snap_key)
                     try:
-                        path = trader.save_portfolio(self.store, mode="backtest", date=close_date)
+                        path = trader.save_portfolio(
+                            self.store,
+                            mode="backtest",
+                            date=close_date,
+                            run_id=self._run_id,
+                        )
                         logger.info("BACKTEST portfolio snapshot saved for trader '%s' date=%s → %s", trader.id, close_date, path)
                     except Exception as exc:
                         logger.error("BACKTEST portfolio snapshot failed for trader '%s': %s", trader.id, exc)
@@ -334,10 +339,27 @@ class Engine:
             bar_times[-1].isoformat() if bar_times else "N/A",
         )
 
+        trading_days = sorted({bt.date() for bt in bar_times})
+        total_days = len(trading_days)
+        day_index_map = {d: idx + 1 for idx, d in enumerate(trading_days)}
+        last_logged_day = None
+
         for bar_time in bar_times:
             if self._stop_flag:
                 logger.info("Stop flag set; exiting backtest loop.")
                 break
+            current_day = bar_time.date()
+            if current_day != last_logged_day:
+                current_day_index = day_index_map.get(current_day, 0)
+                progress = (current_day_index / total_days * 100.0) if total_days else 0.0
+                logger.info(
+                    "Backtest progress: day %s (%d/%d, %.1f%%).",
+                    current_day.isoformat(),
+                    current_day_index,
+                    total_days,
+                    progress,
+                )
+                last_logged_day = current_day
             self._tick(bar_time)
 
         logger.info("Backtest loop completed.")
@@ -494,7 +516,6 @@ class Engine:
                 initial_cash=initial_cash,
                 final_nav=final_nav,
                 metrics=metrics_dict,
-                trades=list(trades),
             )
 
             # 写入 trader 自己的 backtest 目录

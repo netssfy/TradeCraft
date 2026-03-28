@@ -157,7 +157,13 @@ class Trader:
         ]
         return store.save_trades(self.id, run_id, trades, mode)
 
-    def save_portfolio(self, store: "TraderStore", mode: str = "paper", date: Optional[str] = None) -> str:  # noqa: F821
+    def save_portfolio(
+        self,
+        store: "TraderStore",
+        mode: str = "paper",
+        date: Optional[str] = None,
+        run_id: Optional[str] = None,
+    ) -> str:  # noqa: F821
         """将当前持仓快照追加到 portfolio/{mode}.json。
 
         若提供 date（YYYY-MM-DD）则写入带日期的记录；否则用当前 UTC 日期。
@@ -176,6 +182,8 @@ class Trader:
                 for symbol, pos in self.portfolio.positions.items()
             },
         }
+        if run_id:
+            snapshot["run_id"] = run_id
         return store.append_portfolio_snapshot(self.id, mode, snapshot)
 
     # ------------------------------------------------------------------

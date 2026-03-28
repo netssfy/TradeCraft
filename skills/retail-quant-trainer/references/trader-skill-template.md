@@ -78,3 +78,21 @@ When executing the trader skill/prompt:
 - Modify only what is needed for the current cycle.
 - Produce deterministic, inspectable rules.
 - Return updated strategy code as the primary deliverable.
+
+## Research Data and Process Rules (Required)
+
+When the trader is in research mode:
+- Allow online research to collect market context, news, and method references.
+- Read market data from `backend/data/market` first.
+- If the required `SYMBOL` data is missing under `backend/data/market`, fetch it from `data_feed/market/repository`.
+- After fetching from `data_feed/market/repository`, persist the resolved symbol data back to `backend/data/market` for reuse.
+- Allow writing and running Python analysis code for data processing, signal checks, and experiment comparison.
+
+Research output requirements:
+- Treat Codex research output as process logs (hypotheses, checks, evidence, keep/discard rationale), not only final conclusions.
+- Save research artifacts under `backend/data/traders/{id}/research`.
+- Keep research files structured by date/cycle where possible for traceability.
+
+Direction constraint (must enforce):
+- Ensure every research topic, feature test, and parameter exploration is directly tied to the trader's own traits/style card.
+- Reject or mark as out-of-scope any research branch that is not consistent with the trader's defined characteristics.

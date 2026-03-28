@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import subprocess
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -16,6 +17,8 @@ from app.engine.trader_store import TraderStore
 
 router = APIRouter(prefix="/traders", tags=["traders"])
 store = TraderStore(base_dir="data/traders")
+logger = logging.getLogger(__name__)
+engine_logger = logging.getLogger("app.engine.core")
 
 
 class TraitsModel(BaseModel):
@@ -307,13 +310,43 @@ def set_active_strategy(trader_id: str, filename: str):
     summary="Get portfolio history",
     description="Returns all daily snapshots for the given mode (paper or backtest).",
 )
-def get_portfolio(trader_id: str, mode: str):
+def get_portfolio(trader_id: str, mode: str, run_id: Optional[str] = None):
     _assert_exists(trader_id)
     if mode not in ("paper", "backtest"):
         raise HTTPException(status_code=400, detail="mode must be paper or backtest")
     records = store.load_portfolio(trader_id, mode)
     if records is None:
         raise HTTPException(status_code=404, detail=f"No portfolio data for mode '{mode}'.")
+
+    if mode == "backtest" and run_id:
+        tagged = [r for r in records if r.get("run_id") == run_id]
+        if tagged:
+            records = tagged
+        else:
+            report_path = os.path.join(store.trades_dir(trader_id, "backtest"), f"{run_id}_report.json")
+            if not os.path.isfile(report_path):
+                raise HTTPException(status_code=404, detail=f"No portfolio data for backtest run '{run_id}'.")
+            with open(report_path, "r", encoding="utf-8") as f:
+                report = json.load(f)
+            try:
+                start = datetime.fromisoformat(report["backtest_start"]).date()
+                end = datetime.fromisoformat(report["backtest_end"]).date()
+            except Exception:
+                raise HTTPException(status_code=404, detail=f"No portfolio data for backtest run '{run_id}'.")
+            filtered = []
+            for r in records:
+                d = r.get("date")
+                if not isinstance(d, str):
+                    continue
+                try:
+                    rd = date.fromisoformat(d)
+                except ValueError:
+                    continue
+                if start <= rd <= end:
+                    filtered.append(r)
+            records = filtered
+        if not records:
+            raise HTTPException(status_code=404, detail=f"No portfolio data for backtest run '{run_id}'.")
     snapshots = [
         PortfolioSnapshotModel(
             date=r["date"],
@@ -347,9 +380,9 @@ def get_trades(trader_id: str, mode: str, run_id: str):
     _assert_exists(trader_id)
     if mode not in ("paper", "backtest"):
         raise HTTPException(status_code=400, detail="mode must be paper or backtest")
-    trades = store.load_trades(trader_id, run_id, mode)
-    if not trades:
+    if run_id not in store.list_trade_runs(trader_id, mode):
         raise HTTPException(status_code=404, detail=f"Trades not found: {mode}/{run_id}")
+    trades = store.load_trades(trader_id, run_id, mode)
     return [TradeModel(**t) for t in trades]
 
 
@@ -361,7 +394,7 @@ def get_trades(trader_id: str, mode: str, run_id: str):
 def run_backtest_once(trader_id: str, req: BacktestRunRequest):
     from app.adapters.data_feed import AkshareDataFeed, BaostockDataFeed, YfinanceDataFeed
     from app.adapters.simulator import Simulator
-    from app.core.config import load_config
+    from app.core.config import BacktestConfig, Config
     from app.data.repository import MarketRepository
     from app.engine.core import Engine, EngineMode
     from app.engine.trader import Trader
@@ -382,10 +415,14 @@ def run_backtest_once(trader_id: str, req: BacktestRunRequest):
     if start_date > end_date:
         raise HTTPException(status_code=400, detail="start_date must be <= end_date")
 
-    config = load_config("config.yaml")
-    config.mode = "backtest"
-    config.backtest.start_date = start_date.isoformat()
-    config.backtest.end_date = end_date.isoformat()
+    config = Config(
+        mode="backtest",
+        bar_interval="1m",
+        backtest=BacktestConfig(
+            start_date=start_date.isoformat(),
+            end_date=end_date.isoformat(),
+        ),
+    )
 
     repository = MarketRepository()
     simulator = Simulator(commission_rate=0.0003)
@@ -423,6 +460,8 @@ def run_backtest_once(trader_id: str, req: BacktestRunRequest):
 
     # Ensure trade run metadata exists even when there are no fills.
     trader.save_trades(store, engine._run_id, mode="backtest")
+    logger.info("Backtest API completed: trader_id=%s run_id=%s", trader_id, engine._run_id)
+    engine_logger.info("Backtest API completed: trader_id=%s run_id=%s", trader_id, engine._run_id)
 
     return BacktestRunResult(trader_id=trader_id, run_id=engine._run_id)
 

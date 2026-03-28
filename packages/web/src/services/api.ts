@@ -37,8 +37,10 @@ export const api = {
   deleteTrader: (id: string) =>
     request<void>(`/traders/${id}`, { method: 'DELETE' }),
 
-  getPortfolio: (id: string, mode: string) =>
-    request<Portfolio>(`/traders/${id}/portfolio/${mode}`),
+  getPortfolio: (id: string, mode: string, runId?: string) =>
+    request<Portfolio>(
+      `/traders/${id}/portfolio/${mode}${runId ? `?run_id=${encodeURIComponent(runId)}` : ''}`
+    ),
 
   listStrategies: (id: string) =>
     request<StrategyFile[]>(`/traders/${id}/strategy`),
