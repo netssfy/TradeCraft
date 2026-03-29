@@ -74,7 +74,10 @@ export const api = {
   getBacktestReport: (id: string, runId: string) =>
     request<BacktestReport>(`/traders/${id}/backtest/report/${runId}`),
 
-  runBacktest: (id: string, range?: { start_date?: string; end_date?: string }) =>
+  runBacktest: (
+    id: string,
+    range?: { start_date?: string; end_date?: string; strategy_filename?: string }
+  ) =>
     request<{ trader_id: string; run_id: string }>(`/traders/${id}/backtest/run`, {
       method: 'POST',
       body: JSON.stringify(range ?? {}),
@@ -91,6 +94,11 @@ export interface ResearchSSECallbacks {
   onLog?: (message: string) => void;
   onResult?: (data: { trader_id: string; strategies: string[] }) => void;
   onError?: (message: string) => void;
+}
+
+export interface ResearchStrategyOptions {
+  mode?: 'create' | 'update';
+  target?: string;
 }
 
 export async function createTraderSSE(
@@ -148,9 +156,15 @@ export async function createTraderSSE(
 
 export async function researchStrategySSE(
   traderId: string,
-  callbacks: ResearchSSECallbacks
+  callbacks: ResearchSSECallbacks,
+  options?: ResearchStrategyOptions
 ): Promise<void> {
-  const res = await fetch(`${API_BASE}/traders/${traderId}/strategy/research`, {
+  const params = new URLSearchParams();
+  if (options?.mode) params.set('mode', options.mode);
+  if (options?.target) params.set('target', options.target);
+  const query = params.toString();
+  const url = `${API_BASE}/traders/${traderId}/strategy/research${query ? `?${query}` : ''}`;
+  const res = await fetch(url, {
     method: 'POST',
   });
 

@@ -9,7 +9,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 from starlette.responses import StreamingResponse
 
@@ -81,6 +81,7 @@ class BacktestRunResult(BaseModel):
 class BacktestRunRequest(BaseModel):
     start_date: Optional[str] = Field(None, description="Backtest start date (YYYY-MM-DD)")
     end_date: Optional[str] = Field(None, description="Backtest end date (YYYY-MM-DD)")
+    strategy_filename: Optional[str] = Field(None, description="Strategy filename to run for this backtest")
 
 
 class BacktestMetricsModel(BaseModel):
@@ -293,13 +294,27 @@ async def upload_strategy(trader_id: str, file: UploadFile = File(...)):
     summary="Research strategy",
     description="Invoke Codex to research and generate a trading strategy for the specified trader.",
 )
-def research_strategy(trader_id: str):
+def research_strategy(
+    trader_id: str,
+    mode: str = Query(default="create", pattern="^(create|update)$"),
+    target: Optional[str] = Query(default=None),
+):
     from app.engine.trader import research_strategy as _research
 
     _assert_exists(trader_id)
+    return _research_strategy_internal(trader_id, mode=mode, target=target, fn=_research)
+
+
+def _research_strategy_internal(
+    trader_id: str,
+    mode: str,
+    target: Optional[str],
+    fn,
+):
+    _assert_exists(trader_id)
 
     def _stream():
-        for evt in _research(trader_id, store):
+        for evt in fn(trader_id, store, mode=mode, target=target):
             yield _sse_event(evt["event"], {k: v for k, v in evt.items() if k != "event"})
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
@@ -331,25 +346,23 @@ def get_portfolio(trader_id: str, mode: str, run_id: Optional[str] = None):
     _assert_exists(trader_id)
     if mode not in ("paper", "backtest"):
         raise HTTPException(status_code=400, detail="mode must be paper or backtest")
-    records = store.load_portfolio(trader_id, mode)
+    records = store.load_portfolio(trader_id, mode, run_id=run_id if mode == "backtest" else None)
     if records is None:
         raise HTTPException(status_code=404, detail=f"No portfolio data for mode '{mode}'.")
 
     if mode == "backtest" and run_id:
-        tagged = [r for r in records if r.get("run_id") == run_id]
-        if tagged:
-            records = tagged
-        else:
+        if not records:
             report = store.load_report(trader_id, run_id, mode="backtest")
             if report is None:
                 raise HTTPException(status_code=404, detail=f"No portfolio data for backtest run '{run_id}'.")
+            full_records = store.load_portfolio(trader_id, mode) or []
             try:
                 start = datetime.fromisoformat(report["backtest_start"]).date()
                 end = datetime.fromisoformat(report["backtest_end"]).date()
             except Exception:
                 raise HTTPException(status_code=404, detail=f"No portfolio data for backtest run '{run_id}'.")
             filtered = []
-            for r in records:
+            for r in full_records:
                 d = r.get("date")
                 if not isinstance(d, str):
                     continue
@@ -461,7 +474,22 @@ def run_backtest_once(trader_id: str, req: BacktestRunRequest):
 
     repository = MarketRepository()
     simulator = Simulator(commission_rate=0.0003)
-    trader = Trader.from_dir(trader_id, store, repository, simulator)
+    strategy_filename = req.strategy_filename
+    if strategy_filename is not None:
+        strategy_filename = strategy_filename.strip() or None
+
+    try:
+        trader = Trader.from_dir(
+            trader_id,
+            store,
+            repository,
+            simulator,
+            strategy_filename=strategy_filename,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid strategy selection: {exc}")
 
     feed_cls_map = {
         "akshare": AkshareDataFeed,

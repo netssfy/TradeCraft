@@ -67,6 +67,7 @@ class Trader:
         store: "TraderStore",  # noqa: F821 — resolved at runtime
         repository: MarketRepository,
         simulator: "Simulator",
+        strategy_filename: Optional[str] = None,
     ) -> "Trader":
         """从 data/traders/{name}/ 目录加载 Trader。
 
@@ -93,7 +94,7 @@ class Trader:
         traits: dict = info.get("traits", {})
 
         # 加载策略
-        strategy_path = store.get_strategy_path(name)
+        strategy_path = store.get_strategy_path(name, strategy_filename=strategy_filename)
         result = StrategyLoader.load(strategy_path)
         if not result.success:
             raise ValueError(f"Failed to load strategy for trader '{name}': {result.error}")
@@ -184,7 +185,7 @@ class Trader:
         }
         if run_id:
             snapshot["run_id"] = run_id
-        return store.append_portfolio_snapshot(self.id, mode, snapshot)
+        return store.append_portfolio_snapshot(self.id, mode, snapshot, run_id=run_id)
 
     # ------------------------------------------------------------------
     # 运行时接口
@@ -239,8 +240,14 @@ def _codex_cmd() -> List[str]:
     ]
 
 
-def _research_prompt(info: Dict[str, Any], store: "TraderStore") -> str:
+def _research_prompt(
+    info: Dict[str, Any],
+    store: "TraderStore",
+    mode: str,
+    target: Optional[str],
+) -> str:
     repo_root = Path(__file__).resolve().parents[3]
+    backend_root = Path(__file__).resolve().parents[2]
     strategy_contract = (repo_root / "backend" / "app" / "trading" / "strategy.py").as_posix()
     trader_id = info["id"]
     trader_skill_path = Path(store.trader_dir(trader_id)) / "SKILL.md"
@@ -249,11 +256,21 @@ def _research_prompt(info: Dict[str, Any], store: "TraderStore") -> str:
 
     traits = info.get("traits", {})
     traits_str = ", ".join(f"{k}={v}" for k, v in traits.items())
-    sdir = store.strategy_dir(trader_id)
+    sdir = Path(store.strategy_dir(trader_id))
+    strategy_dir_abs = (backend_root / sdir).resolve()
     existing: List[str] = []
-    if os.path.isdir(sdir):
-        existing = sorted(f for f in os.listdir(sdir) if f.endswith(".py"))
+    if strategy_dir_abs.is_dir():
+        existing = sorted(f for f in os.listdir(strategy_dir_abs) if f.endswith(".py"))
     existing_str = ", ".join(existing) if existing else "(none)"
+    mode_instruction = (
+        "Create one new strategy file with a unique filename; do not overwrite existing files. "
+        if mode == "create"
+        else (
+            f"Update only the selected strategy file '{target}' in place; do not create new strategy files. "
+            "Keep the filename unchanged. "
+        )
+    )
+
     return (
         f"Use [{trader_id} skill]({trader_skill_path.as_posix()}). "
         f"You are researching a trading strategy for existing trader '{trader_id}'. "
@@ -263,13 +280,16 @@ def _research_prompt(info: Dict[str, Any], store: "TraderStore") -> str:
         f"Trader traits: {traits_str}. "
         f"Existing strategy files: {existing_str}. "
         f"Strategy interface contract: {strategy_contract}. "
+        f"Authoritative strategy output directory (absolute): {strategy_dir_abs.as_posix()}. "
+        "Ignore any conflicting relative output path in skill references. "
         "Follow the autoresearch daily loop: generate candidate variants, evaluate, keep or discard with rationale. "
         "Implement the final accepted variant as a Python file in the trader strategy directory "
-        f"({sdir}/). "
+        f"({strategy_dir_abs.as_posix()}/). "
         f"The file must import and subclass Strategy from {strategy_contract}. "
         f"Implement initialize and on_bar methods. "
         "Keep logic explainable, enforce risk constraints from trader traits. "
         "Do not call backend API directly. "
+        f"{mode_instruction}"
         "Produce strategy code artifacts only. "
     )
 
@@ -277,6 +297,8 @@ def _research_prompt(info: Dict[str, Any], store: "TraderStore") -> str:
 def research_strategy(
     trader_id: str,
     store: "TraderStore",
+    mode: str = "create",
+    target: Optional[str] = None,
 ) -> Generator[Dict[str, Any], None, None]:
     """调用 Codex 为指定交易员研究并生成交易策略。
 
@@ -287,7 +309,33 @@ def research_strategy(
     """
     info = store.load_info(trader_id)
 
-    yield {"event": "log", "message": f"Starting strategy research for trader '{trader_id}'..."}
+    if mode not in {"create", "update"}:
+        msg = f"Invalid mode: {mode}"
+        logger.error("[research][%s] %s", trader_id, msg)
+        yield {"event": "error", "message": msg}
+        return
+
+    if mode == "update":
+        if not target:
+            msg = "Update mode requires a target strategy filename."
+            logger.error("[research][%s] %s", trader_id, msg)
+            yield {"event": "error", "message": msg}
+            return
+        target_path = Path(store.strategy_dir(trader_id)) / target
+        if not target.endswith(".py") or not target_path.is_file():
+            msg = f"Target strategy not found: {target}"
+            logger.error("[research][%s] %s", trader_id, msg)
+            yield {"event": "error", "message": msg}
+            return
+
+    start_msg = (
+        f"Starting strategy research for trader '{trader_id}' (mode={mode}{', target=' + target if target else ''})..."
+    )
+    logger.info("[research][%s] %s", trader_id, start_msg)
+    yield {
+        "event": "log",
+        "message": start_msg,
+    }
 
     try:
         process = subprocess.Popen(
@@ -301,10 +349,12 @@ def research_strategy(
             bufsize=1,
         )
     except Exception as exc:
-        yield {"event": "error", "message": f"Failed to start Codex: {exc}"}
+        msg = f"Failed to start Codex: {exc}"
+        logger.exception("[research][%s] %s", trader_id, msg)
+        yield {"event": "error", "message": msg}
         return
 
-    prompt = _research_prompt(info, store)
+    prompt = _research_prompt(info, store, mode=mode, target=target)
     assert process.stdin is not None
     process.stdin.write(prompt)
     process.stdin.close()
@@ -312,11 +362,14 @@ def research_strategy(
     assert process.stdout is not None
     for raw in process.stdout:
         line = raw.rstrip("\r\n")
+        logger.info("[research][%s][codex] %s", trader_id, line)
         yield {"event": "log", "message": line}
 
     return_code = process.wait()
     if return_code != 0:
-        yield {"event": "error", "message": f"Codex exited with status {return_code}"}
+        msg = f"Codex exited with status {return_code}"
+        logger.error("[research][%s] %s", trader_id, msg)
+        yield {"event": "error", "message": msg}
         return
 
     sdir = store.strategy_dir(trader_id)
@@ -324,4 +377,5 @@ def research_strategy(
     if os.path.isdir(sdir):
         files = sorted(f for f in os.listdir(sdir) if f.endswith(".py"))
 
+    logger.info("[research][%s] completed, strategies=%s", trader_id, files)
     yield {"event": "result", "strategies": files}

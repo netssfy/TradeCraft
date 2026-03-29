@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import type { BacktestReport, Portfolio, Trade, TradeRuns, Trader } from '@tradecraft/shared/types';
+import type { BacktestReport, Portfolio, StrategyFile, Trade, TradeRuns, Trader } from '@tradecraft/shared/types';
 import { TRAIT_LABELS, formatCurrency } from '@tradecraft/shared/utils';
 import EditTraderModal from '../components/EditTraderModal';
 import ErrorMessage from '../components/ErrorMessage';
@@ -18,6 +18,7 @@ export default function TraderDetailPage() {
   const navigate = useNavigate();
 
   const [trader, setTrader] = useState<Trader | null>(null);
+  const [strategyFiles, setStrategyFiles] = useState<StrategyFile[]>([]);
   const [tradeRuns, setTradeRuns] = useState<TradeRuns | null>(null);
 
   const [mode, setMode] = useState<Mode>('paper');
@@ -42,6 +43,7 @@ export default function TraderDetailPage() {
   const [showBacktestConfig, setShowBacktestConfig] = useState(false);
   const [backtestStartDate, setBacktestStartDate] = useState('');
   const [backtestEndDate, setBacktestEndDate] = useState('');
+  const [backtestStrategyFilename, setBacktestStrategyFilename] = useState('');
 
   const formatDateInput = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -59,6 +61,8 @@ export default function TraderDetailPage() {
     const range = getDefaultBacktestRange();
     setBacktestStartDate(range.start);
     setBacktestEndDate(range.end);
+    const active = strategyFiles.find((s) => s.is_active)?.filename ?? '';
+    setBacktestStrategyFilename((prev) => prev || active);
     setShowBacktestConfig(true);
   };
 
@@ -84,15 +88,27 @@ export default function TraderDetailPage() {
     return runs;
   };
 
+  const refreshStrategyFiles = async (traderId: string) => {
+    const files = await api.listStrategies(traderId);
+    setStrategyFiles(files);
+    const active = files.find((s) => s.is_active)?.filename ?? '';
+    setBacktestStrategyFilename((prev) => {
+      if (prev && files.some((f) => f.filename === prev)) return prev;
+      return active;
+    });
+    return files;
+  };
+
   useEffect(() => {
     if (!id) return;
 
     setLoading(true);
     setError(null);
 
-    Promise.all([api.getTrader(id), refreshRuns(id)])
+    Promise.all([api.getTrader(id), refreshRuns(id), refreshStrategyFiles(id)])
       .then(([loadedTrader, runs]) => {
         setTrader(loadedTrader);
+        setBacktestStrategyFilename((prev) => prev || loadedTrader.active_strategy || '');
         if (runs.backtest.length > 0 && runs.paper.length === 0) {
           setMode('backtest');
         }
@@ -175,10 +191,14 @@ export default function TraderDetailPage() {
     }
   };
 
-  const handleRunBacktest = async (startDate: string, endDate: string) => {
+  const handleRunBacktest = async (startDate: string, endDate: string, strategyFilename: string) => {
     if (!id) return;
     if (startDate > endDate) {
       setError('回测开始日期不能晚于结束日期。');
+      return;
+    }
+    if (!strategyFilename) {
+      setError('请选择一个策略用于回测。');
       return;
     }
 
@@ -189,6 +209,7 @@ export default function TraderDetailPage() {
       const result = await api.runBacktest(id, {
         start_date: startDate,
         end_date: endDate,
+        strategy_filename: strategyFilename,
       });
 
       await refreshRuns(id);
@@ -291,7 +312,10 @@ export default function TraderDetailPage() {
         </div>
       </div>
 
-      <StrategyManager traderId={trader.id} onUpdate={() => api.getTrader(trader.id).then(setTrader)} />
+      <StrategyManager
+        traderId={trader.id}
+        onUpdate={() => Promise.all([api.getTrader(trader.id).then(setTrader), refreshStrategyFiles(trader.id)]).then(() => undefined)}
+      />
 
       <div className="card" style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -541,6 +565,25 @@ export default function TraderDetailPage() {
                   style={{ width: '100%', marginTop: 6 }}
                 />
               </label>
+              <label style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                回测策略
+                <select
+                  value={backtestStrategyFilename}
+                  onChange={(e) => setBacktestStrategyFilename(e.target.value)}
+                  style={{ width: '100%', marginTop: 6 }}
+                >
+                  {strategyFiles.length === 0 ? (
+                    <option value="">暂无可用策略</option>
+                  ) : (
+                    strategyFiles.map((s) => (
+                      <option key={s.filename} value={s.filename}>
+                        {s.filename}
+                        {s.is_active ? ' (Active)' : ''}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </label>
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
               <button className="btn" onClick={() => setShowBacktestConfig(false)} disabled={runningBacktest}>
@@ -548,8 +591,8 @@ export default function TraderDetailPage() {
               </button>
               <button
                 className="btn btn-primary"
-                onClick={() => handleRunBacktest(backtestStartDate, backtestEndDate)}
-                disabled={runningBacktest}
+                onClick={() => handleRunBacktest(backtestStartDate, backtestEndDate, backtestStrategyFilename)}
+                disabled={runningBacktest || strategyFiles.length === 0 || !backtestStrategyFilename}
               >
                 {runningBacktest ? '回测中...' : '确认'}
               </button>

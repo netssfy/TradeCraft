@@ -83,7 +83,7 @@ class TraderStore:
     # 策略文件
     # ------------------------------------------------------------------
 
-    def get_strategy_path(self, name: str) -> str:
+    def get_strategy_path(self, name: str, strategy_filename: Optional[str] = None) -> str:
         """返回 active_strategy 指定的策略文件路径。
         
         优先读取 trader.json 中的 active_strategy 字段；
@@ -93,22 +93,24 @@ class TraderStore:
         if not os.path.isdir(sdir):
             raise TraderStoreError(f"Strategy directory not found for trader '{name}': {sdir}")
 
-        # 尝试从 trader.json 读取 active_strategy
-        try:
-            info = self.load_info(name)
-            active = info.get("active_strategy")
-        except TraderStoreError:
-            active = None
+        selected = strategy_filename
+        if not selected:
+            # 尝试从 trader.json 读取 active_strategy
+            try:
+                info = self.load_info(name)
+                selected = info.get("active_strategy")
+            except TraderStoreError:
+                selected = None
 
-        if not active:
+        if not selected:
             raise TraderStoreError(
                 f"Trader '{name}' has no active_strategy configured in trader.json"
             )
 
-        path = os.path.join(sdir, active)
+        path = os.path.join(sdir, selected)
         if not os.path.isfile(path):
             raise TraderStoreError(
-                f"active_strategy '{active}' not found in {sdir}"
+                f"strategy '{selected}' not found in {sdir}"
             )
         return path
 
@@ -179,10 +181,19 @@ class TraderStore:
     # 持仓快照
     # ------------------------------------------------------------------
 
-    def _portfolio_path(self, name: str, mode: str) -> str:
+    def _portfolio_path(self, name: str, mode: str, run_id: Optional[str] = None) -> str:
+        # Backtest snapshots are stored as portfolio/{run_id}.json for one-to-one mapping.
+        if mode == "backtest" and run_id:
+            return os.path.join(self.portfolio_dir(name), f"{run_id}.json")
         return os.path.join(self.portfolio_dir(name), f"{mode}.json")
 
-    def append_portfolio_snapshot(self, name: str, mode: str, snapshot: Dict[str, Any]) -> str:
+    def append_portfolio_snapshot(
+        self,
+        name: str,
+        mode: str,
+        snapshot: Dict[str, Any],
+        run_id: Optional[str] = None,
+    ) -> str:
         """将单日快照追加（或更新）到 portfolio/{mode}.json 数组中。
 
         snapshot 必须包含 "date" 字段（YYYY-MM-DD）。
@@ -191,7 +202,7 @@ class TraderStore:
         """
         pdir = self.portfolio_dir(name)
         os.makedirs(pdir, exist_ok=True)
-        path = self._portfolio_path(name, mode)
+        path = self._portfolio_path(name, mode, run_id=run_id)
 
         records: List[Dict[str, Any]] = []
         if os.path.exists(path):
@@ -211,8 +222,27 @@ class TraderStore:
             json.dump(records, f, ensure_ascii=False, indent=2)
         return path
 
-    def load_portfolio(self, name: str, mode: str = "paper") -> Optional[List[Dict[str, Any]]]:
+    def load_portfolio(
+        self,
+        name: str,
+        mode: str = "paper",
+        run_id: Optional[str] = None,
+    ) -> Optional[List[Dict[str, Any]]]:
         """读取 portfolio/{mode}.json，返回快照数组；文件不存在时返回 None。"""
+        if mode == "backtest" and run_id:
+            # New layout: one file per backtest run.
+            path = self._portfolio_path(name, mode, run_id=run_id)
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            # Backward compatibility for historical backtest.json layout.
+            legacy_path = self._portfolio_path(name, mode)
+            if not os.path.exists(legacy_path):
+                return None
+            with open(legacy_path, "r", encoding="utf-8") as f:
+                records = json.load(f)
+            return [r for r in records if r.get("run_id") == run_id]
+
         path = self._portfolio_path(name, mode)
         if not os.path.exists(path):
             return None

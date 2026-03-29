@@ -27,6 +27,7 @@ export default function StrategyManager({ traderId, onUpdate }: StrategyManagerP
   const nextMessageIdRef = useRef(1);
 
   const [strategies, setStrategies] = useState<StrategyFile[]>([]);
+  const [selectedStrategy, setSelectedStrategy] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [researching, setResearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -76,7 +77,14 @@ export default function StrategyManager({ traderId, onUpdate }: StrategyManagerP
     setLoading(true);
     api
       .listStrategies(traderId)
-      .then(setStrategies)
+      .then((list) => {
+        setStrategies(list);
+        const active = list.find((item) => item.is_active)?.filename ?? null;
+        setSelectedStrategy((prev) => {
+          if (prev && list.some((item) => item.filename === prev)) return prev;
+          return active ?? list[0]?.filename ?? null;
+        });
+      })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   };
@@ -97,7 +105,12 @@ export default function StrategyManager({ traderId, onUpdate }: StrategyManagerP
     }
   };
 
-  const handleResearch = async () => {
+  const handleResearch = async (mode: 'create' | 'update') => {
+    if (mode === 'update' && !selectedStrategy) {
+      setError('No strategy selected.');
+      return;
+    }
+
     setResearching(true);
     setMessages([]);
     setError(null);
@@ -117,6 +130,9 @@ export default function StrategyManager({ traderId, onUpdate }: StrategyManagerP
           setError(msg);
           setResearching(false);
         },
+      }, {
+        mode,
+        target: mode === 'update' ? selectedStrategy ?? undefined : undefined,
       });
     } catch (e: any) {
       appendMessage('error', e.message);
@@ -132,8 +148,11 @@ export default function StrategyManager({ traderId, onUpdate }: StrategyManagerP
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <div className="label" style={{ margin: 0 }}>Strategy Files</div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-primary" onClick={handleResearch} disabled={researching}>
-            {researching ? 'Researching...' : 'AI Research'}
+          <button className="btn btn-primary" onClick={() => handleResearch('create')} disabled={researching}>
+            {researching ? 'Researching...' : 'Create New Strategy'}
+          </button>
+          <button className="btn" onClick={() => handleResearch('update')} disabled={researching || !selectedStrategy}>
+            {researching ? 'Researching...' : 'Update Selected Strategy'}
           </button>
         </div>
       </div>
@@ -151,11 +170,21 @@ export default function StrategyManager({ traderId, onUpdate }: StrategyManagerP
           {strategies.map((s) => (
             <div
               key={s.filename}
-              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--border-color)' }}
+              onClick={() => setSelectedStrategy(s.filename)}
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '8px 0',
+                borderBottom: '1px solid var(--border-color)',
+                cursor: 'pointer',
+                background: selectedStrategy === s.filename ? 'rgba(30, 64, 175, 0.08)' : 'transparent',
+              }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span className="mono" style={{ fontSize: 13 }}>{s.filename}</span>
                 {s.is_active && <span className="badge badge-green">Active</span>}
+                {selectedStrategy === s.filename && <span className="badge">Selected</span>}
               </div>
               {!s.is_active && (
                 <button className="btn" onClick={() => handleSetActive(s.filename)} style={{ padding: '4px 8px', fontSize: 12 }}>
