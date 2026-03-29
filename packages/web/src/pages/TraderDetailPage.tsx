@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import type { Portfolio, Trade, TradeRuns, Trader } from '@tradecraft/shared/types';
+import type { BacktestReport, Portfolio, Trade, TradeRuns, Trader } from '@tradecraft/shared/types';
 import { TRAIT_LABELS, formatCurrency } from '@tradecraft/shared/utils';
 import EditTraderModal from '../components/EditTraderModal';
 import ErrorMessage from '../components/ErrorMessage';
@@ -26,12 +26,14 @@ export default function TraderDetailPage() {
 
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
   const [trades, setTrades] = useState<Trade[] | null>(null);
+  const [backtestReport, setBacktestReport] = useState<BacktestReport | null>(null);
   const [tradesPage, setTradesPage] = useState(1);
 
   const [loading, setLoading] = useState(true);
   const [dataLoading, setDataLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [portfolioError, setPortfolioError] = useState<string | null>(null);
+  const [reportError, setReportError] = useState<string | null>(null);
 
   const [showEdit, setShowEdit] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -106,11 +108,14 @@ export default function TraderDetailPage() {
       setPortfolio(null);
       setPortfolioError('未选择回测运行。');
       setTrades([]);
+      setBacktestReport(null);
+      setReportError(null);
       return;
     }
 
     setDataLoading(true);
     setPortfolioError(null);
+    setReportError(null);
 
     const portfolioPromise = api.getPortfolio(
       id,
@@ -122,21 +127,34 @@ export default function TraderDetailPage() {
       ? api.getTrades(id, mode, activeRunId)
       : Promise.resolve([] as Trade[]);
 
-    Promise.all([portfolioPromise, tradesPromise])
-      .then(([loadedPortfolio, loadedTrades]) => {
+    const reportPromise =
+      mode === 'backtest' && selectedBacktestRunId
+        ? api.getBacktestReport(id, selectedBacktestRunId).catch((e: Error) => {
+            if (e.message.includes('404')) return null;
+            throw e;
+          })
+        : Promise.resolve(null as BacktestReport | null);
+
+    Promise.all([portfolioPromise, tradesPromise, reportPromise])
+      .then(([loadedPortfolio, loadedTrades, loadedReport]) => {
         setPortfolio(loadedPortfolio);
         setTrades(loadedTrades);
+        setBacktestReport(loadedReport);
         setPortfolioError(null);
+        setReportError(null);
       })
       .catch((e: Error) => {
         if (e.message.includes('404')) {
           setPortfolio(null);
           setTrades([]);
+          setBacktestReport(null);
           setPortfolioError('当前选择的运行暂无数据。');
           return;
         }
         setPortfolioError(e.message);
         setTrades([]);
+        setBacktestReport(null);
+        setReportError(mode === 'backtest' ? e.message : null);
       })
       .finally(() => setDataLoading(false));
   }, [id, mode, selectedBacktestRunId, selectedPaperRunId, activeRunId]);
@@ -194,6 +212,9 @@ export default function TraderDetailPage() {
     const start = (tradesPage - 1) * TRADES_PAGE_SIZE;
     return trades.slice(start, start + TRADES_PAGE_SIZE);
   }, [trades, tradesPage]);
+
+  const formatPercent = (value: number) => `${(value * 100).toFixed(2)}%`;
+  const shortDate = (value: string) => value.split('T')[0] || value;
 
   if (loading) return <LoadingSpinner />;
 
@@ -334,6 +355,50 @@ export default function TraderDetailPage() {
           <div style={{ color: 'var(--text-muted)', padding: 20, textAlign: 'center' }}>暂无数据。</div>
         )}
       </div>
+
+      {mode === 'backtest' && (
+        <div className="card" style={{ marginBottom: 24 }}>
+          <div className="label" style={{ marginBottom: 12 }}>回测报告</div>
+          {dataLoading ? (
+            <LoadingSpinner />
+          ) : reportError ? (
+            <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 20 }}>{reportError}</div>
+          ) : backtestReport ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+              <div>
+                <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>回测区间</div>
+                <div className="mono">{shortDate(backtestReport.backtest_start)} ~ {shortDate(backtestReport.backtest_end)}</div>
+              </div>
+              <div>
+                <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>最终净值</div>
+                <div className="mono">{formatCurrency(backtestReport.final_nav)}</div>
+              </div>
+              <div>
+                <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>年化收益率</div>
+                <div className="mono">{formatPercent(backtestReport.metrics.annualized_return)}</div>
+              </div>
+              <div>
+                <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>最大回撤</div>
+                <div className="mono">{formatPercent(backtestReport.metrics.max_drawdown)}</div>
+              </div>
+              <div>
+                <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>夏普比率</div>
+                <div className="mono">{backtestReport.metrics.sharpe_ratio.toFixed(3)}</div>
+              </div>
+              <div>
+                <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>胜率</div>
+                <div className="mono">{formatPercent(backtestReport.metrics.win_rate)}</div>
+              </div>
+              <div>
+                <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>盈亏比</div>
+                <div className="mono">{backtestReport.metrics.profit_loss_ratio.toFixed(3)}</div>
+              </div>
+            </div>
+          ) : (
+            <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 20 }}>当前回测暂无报告。</div>
+          )}
+        </div>
+      )}
 
       <div className="card" style={{ marginBottom: 24 }}>
         <div className="label" style={{ marginBottom: 12 }}>

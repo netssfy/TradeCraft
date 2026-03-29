@@ -83,6 +83,23 @@ class BacktestRunRequest(BaseModel):
     end_date: Optional[str] = Field(None, description="Backtest end date (YYYY-MM-DD)")
 
 
+class BacktestMetricsModel(BaseModel):
+    annualized_return: float
+    max_drawdown: float
+    sharpe_ratio: float
+    win_rate: float
+    profit_loss_ratio: float
+
+
+class BacktestReportModel(BaseModel):
+    trader_id: str
+    backtest_start: str
+    backtest_end: str
+    initial_cash: float
+    final_nav: float
+    metrics: BacktestMetricsModel
+
+
 class CreateTraderRequest(BaseModel):
     id: str = Field(..., description="Trader unique id")
     market: str = Field(..., description="CN / HK / US")
@@ -323,11 +340,9 @@ def get_portfolio(trader_id: str, mode: str, run_id: Optional[str] = None):
         if tagged:
             records = tagged
         else:
-            report_path = os.path.join(store.trades_dir(trader_id, "backtest"), f"{run_id}_report.json")
-            if not os.path.isfile(report_path):
+            report = store.load_report(trader_id, run_id, mode="backtest")
+            if report is None:
                 raise HTTPException(status_code=404, detail=f"No portfolio data for backtest run '{run_id}'.")
-            with open(report_path, "r", encoding="utf-8") as f:
-                report = json.load(f)
             try:
                 start = datetime.fromisoformat(report["backtest_start"]).date()
                 end = datetime.fromisoformat(report["backtest_end"]).date()
@@ -383,7 +398,27 @@ def get_trades(trader_id: str, mode: str, run_id: str):
     if run_id not in store.list_trade_runs(trader_id, mode):
         raise HTTPException(status_code=404, detail=f"Trades not found: {mode}/{run_id}")
     trades = store.load_trades(trader_id, run_id, mode)
+    if not isinstance(trades, list):
+        raise HTTPException(status_code=422, detail=f"Invalid trades payload for run: {mode}/{run_id}")
+    if any(not isinstance(t, dict) for t in trades):
+        raise HTTPException(status_code=422, detail=f"Invalid trade record format for run: {mode}/{run_id}")
     return [TradeModel(**t) for t in trades]
+
+
+@router.get(
+    "/{trader_id}/backtest/report/{run_id}",
+    response_model=BacktestReportModel,
+    summary="Get one backtest report",
+)
+def get_backtest_report(trader_id: str, run_id: str):
+    _assert_exists(trader_id)
+    report = store.load_report(trader_id, run_id, mode="backtest")
+    if report is None:
+        raise HTTPException(status_code=404, detail=f"Backtest report not found: {run_id}")
+    try:
+        return BacktestReportModel(**report)
+    except Exception:
+        raise HTTPException(status_code=422, detail=f"Invalid backtest report format: {run_id}")
 
 
 @router.post(

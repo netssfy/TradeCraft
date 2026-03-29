@@ -5,8 +5,8 @@ Engine — 系统核心调度器。
 """
 from __future__ import annotations
 
+import json
 import logging
-import os
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -519,12 +519,13 @@ class Engine:
             )
 
             # 写入 trader 自己的 backtest 目录
-            trades_dir = self.store.trades_dir(trader.id, "backtest")
-            os.makedirs(trades_dir, exist_ok=True)
-            path = os.path.join(trades_dir, f"{self._run_id}_report.json")
             try:
-                with open(path, "w", encoding="utf-8") as f:
-                    f.write(report.to_json())
+                path = self.store.save_report(
+                    trader.id,
+                    self._run_id,
+                    json.loads(report.to_json()),
+                    mode="backtest",
+                )
                 logger.info("Report written for trader '%s' → %s", trader.id, path)
             except Exception as exc:
                 logger.error("Failed to write report for trader '%s': %s", trader.id, exc)

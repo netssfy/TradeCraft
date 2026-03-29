@@ -71,3 +71,20 @@ export interface TradeRuns {
   paper: string[];
   backtest: string[];
 }
+
+export interface BacktestMetrics {
+  annualized_return: number;
+  max_drawdown: number;
+  sharpe_ratio: number;
+  win_rate: number;
+  profit_loss_ratio: number;
+}
+
+export interface BacktestReport {
+  trader_id: string;
+  backtest_start: string;
+  backtest_end: string;
+  initial_cash: number;
+  final_nav: number;
+  metrics: BacktestMetrics;
+}

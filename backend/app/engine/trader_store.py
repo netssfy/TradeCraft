@@ -48,6 +48,15 @@ class TraderStore:
     def trades_dir(self, name: str, mode: str = "backtest") -> str:
         return os.path.join(self.trader_dir(name), "trades", mode)
 
+    def trade_run_dir(self, name: str, mode: str, run_id: str) -> str:
+        return os.path.join(self.trades_dir(name, mode), run_id)
+
+    def trade_run_trades_path(self, name: str, mode: str, run_id: str) -> str:
+        return os.path.join(self.trade_run_dir(name, mode, run_id), "trades.json")
+
+    def trade_run_report_path(self, name: str, mode: str, run_id: str) -> str:
+        return os.path.join(self.trade_run_dir(name, mode, run_id), "report.json")
+
     def portfolio_dir(self, name: str) -> str:
         return os.path.join(self.trader_dir(name), PORTFOLIO_DIR)
 
@@ -117,18 +126,37 @@ class TraderStore:
 
     def save_trades(self, name: str, run_id: str, trades: List[Dict[str, Any]], mode: str = "backtest") -> str:
         """将成交记录写入 trades/{mode}/{run_id}.json，返回文件路径。"""
-        tdir = self.trades_dir(name, mode)
-        os.makedirs(tdir, exist_ok=True)
-        path = os.path.join(tdir, f"{run_id}.json")
+        run_dir = self.trade_run_dir(name, mode, run_id)
+        os.makedirs(run_dir, exist_ok=True)
+        path = self.trade_run_trades_path(name, mode, run_id)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(trades, f, ensure_ascii=False, indent=2)
         return path
 
     def load_trades(self, name: str, run_id: str, mode: str = "backtest") -> List[Dict[str, Any]]:
         """读取指定 run_id 的成交记录。"""
-        path = os.path.join(self.trades_dir(name, mode), f"{run_id}.json")
+        path = self.trade_run_trades_path(name, mode, run_id)
+        if not os.path.exists(path):
+            path = os.path.join(self.trades_dir(name, mode), f"{run_id}.json")
         if not os.path.exists(path):
             return []
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    def save_report(self, name: str, run_id: str, report: Dict[str, Any], mode: str = "backtest") -> str:
+        run_dir = self.trade_run_dir(name, mode, run_id)
+        os.makedirs(run_dir, exist_ok=True)
+        path = self.trade_run_report_path(name, mode, run_id)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(report, f, ensure_ascii=False, indent=2)
+        return path
+
+    def load_report(self, name: str, run_id: str, mode: str = "backtest") -> Optional[Dict[str, Any]]:
+        path = self.trade_run_report_path(name, mode, run_id)
+        if not os.path.exists(path):
+            path = os.path.join(self.trades_dir(name, mode), f"{run_id}_report.json")
+        if not os.path.exists(path):
+            return None
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
 
@@ -137,9 +165,15 @@ class TraderStore:
         tdir = self.trades_dir(name, mode)
         if not os.path.isdir(tdir):
             return []
-        return sorted(
-            f[:-5] for f in os.listdir(tdir) if f.endswith(".json")
-        )
+        run_ids = set()
+        for entry in os.listdir(tdir):
+            full_path = os.path.join(tdir, entry)
+            if os.path.isdir(full_path):
+                run_ids.add(entry)
+                continue
+            if entry.endswith(".json") and not entry.endswith("_report.json"):
+                run_ids.add(entry[:-5])
+        return sorted(run_ids)
 
     # ------------------------------------------------------------------
     # 持仓快照

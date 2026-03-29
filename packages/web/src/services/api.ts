@@ -4,6 +4,7 @@ import type {
   StrategyFile,
   Trade,
   TradeRuns,
+  BacktestReport,
   CreateTraderRequest,
   UpdateTraderRequest,
 } from '@tradecraft/shared/types';
@@ -69,6 +70,9 @@ export const api = {
 
   getTrades: (id: string, mode: string, runId: string) =>
     request<Trade[]>(`/traders/${id}/trades/${mode}/${runId}`),
+
+  getBacktestReport: (id: string, runId: string) =>
+    request<BacktestReport>(`/traders/${id}/backtest/report/${runId}`),
 
   runBacktest: (id: string, range?: { start_date?: string; end_date?: string }) =>
     request<{ trader_id: string; run_id: string }>(`/traders/${id}/backtest/run`, {
