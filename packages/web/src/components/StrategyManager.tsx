@@ -25,11 +25,9 @@ function inferMessageType(message: string): StreamMessageType {
 
 export default function StrategyManager({ traderId, onUpdate }: StrategyManagerProps) {
   const nextMessageIdRef = useRef(1);
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const [strategies, setStrategies] = useState<StrategyFile[]>([]);
   const [loading, setLoading] = useState(true);
-  const [uploading, setUploading] = useState(false);
   const [researching, setResearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [messages, setMessages] = useState<StreamMessage[]>([]);
@@ -87,32 +85,6 @@ export default function StrategyManager({ traderId, onUpdate }: StrategyManagerP
     load();
   }, [traderId]);
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (!file.name.endsWith('.py')) {
-      setError('Only .py files are supported');
-      if (fileRef.current) fileRef.current.value = '';
-      return;
-    }
-
-    setUploading(true);
-    setError(null);
-    try {
-      await api.uploadStrategy(traderId, file);
-      appendMessage('result', `Strategy uploaded: ${file.name}`);
-      load();
-      onUpdate();
-    } catch (e: any) {
-      appendMessage('error', e.message);
-      setError(e.message);
-    } finally {
-      setUploading(false);
-      if (fileRef.current) fileRef.current.value = '';
-    }
-  };
-
   const handleSetActive = async (filename: string) => {
     try {
       await api.setActiveStrategy(traderId, filename);
@@ -160,12 +132,8 @@ export default function StrategyManager({ traderId, onUpdate }: StrategyManagerP
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <div className="label" style={{ margin: 0 }}>Strategy Files</div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-primary" onClick={handleResearch} disabled={researching || uploading}>
+          <button className="btn btn-primary" onClick={handleResearch} disabled={researching}>
             {researching ? 'Researching...' : 'AI Research'}
-          </button>
-          <input ref={fileRef} type="file" accept=".py" onChange={handleFileChange} style={{ display: 'none' }} />
-          <button className="btn" onClick={() => fileRef.current?.click()} disabled={uploading || researching}>
-            {uploading ? 'Uploading...' : 'Upload Strategy'}
           </button>
         </div>
       </div>

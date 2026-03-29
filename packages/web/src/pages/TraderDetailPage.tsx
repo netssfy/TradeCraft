@@ -291,6 +291,8 @@ export default function TraderDetailPage() {
         </div>
       </div>
 
+      <StrategyManager traderId={trader.id} onUpdate={() => api.getTrader(trader.id).then(setTrader)} />
+
       <div className="card" style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <div className="label" style={{ margin: 0 }}>数据范围</div>
@@ -555,8 +557,6 @@ export default function TraderDetailPage() {
           </div>
         </div>
       )}
-
-      <StrategyManager traderId={trader.id} onUpdate={() => api.getTrader(trader.id).then(setTrader)} />
 
       {showEdit && (
         <EditTraderModal
