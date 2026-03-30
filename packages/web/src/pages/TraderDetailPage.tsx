@@ -50,6 +50,7 @@ export default function TraderDetailPage() {
 
   const [showEdit, setShowEdit] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deletingBacktestRunId, setDeletingBacktestRunId] = useState<string | null>(null);
   const [runningBacktest, setRunningBacktest] = useState(false);
 
   const [showBacktestConfig, setShowBacktestConfig] = useState(false);
@@ -292,6 +293,25 @@ export default function TraderDetailPage() {
     }
   };
 
+  const handleDeleteBacktestRun = async (runId: string) => {
+    if (!id) return;
+    if (!window.confirm(tx('确定要删除该回测运行吗？', 'Delete this backtest run?'))) return;
+
+    setDeletingBacktestRunId(runId);
+    setError(null);
+    try {
+      await api.deleteBacktestRun(id, runId);
+      await refreshRuns(id);
+      if (selectedBacktestRunId === runId) {
+        setBacktestReport(null);
+      }
+    } catch (e: any) {
+      setError(`${tx('删除回测失败', 'Failed to delete backtest run')}: ${e.message}`);
+    } finally {
+      setDeletingBacktestRunId(null);
+    }
+  };
+
   const totalTradePages = useMemo(() => {
     if (!trades || trades.length === 0) return 1;
     return Math.max(1, Math.ceil(trades.length / TRADES_PAGE_SIZE));
@@ -390,9 +410,11 @@ export default function TraderDetailPage() {
             selectedBacktestStrategyFilename={selectedBacktestStrategyFilename}
             selectedBacktestRunId={selectedBacktestRunId}
             selectedPaperRunId={selectedPaperRunId}
+            deletingBacktestRunId={deletingBacktestRunId}
             onModeChange={setMode}
             onBacktestStrategyChange={setSelectedBacktestStrategyFilename}
             onBacktestRunChange={setSelectedBacktestRunId}
+            onDeleteBacktestRun={handleDeleteBacktestRun}
           />
         </aside>
 

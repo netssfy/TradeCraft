@@ -11,9 +11,11 @@ interface TraderDataScopeSectionProps {
   selectedBacktestStrategyFilename: string | null;
   selectedBacktestRunId: string | null;
   selectedPaperRunId: string | null;
+  deletingBacktestRunId: string | null;
   onModeChange: (mode: Mode) => void;
   onBacktestStrategyChange: (filename: string | null) => void;
   onBacktestRunChange: (runId: string) => void;
+  onDeleteBacktestRun: (runId: string) => void;
 }
 
 export default function TraderDataScopeSection({
@@ -24,9 +26,11 @@ export default function TraderDataScopeSection({
   selectedBacktestStrategyFilename,
   selectedBacktestRunId,
   selectedPaperRunId,
+  deletingBacktestRunId,
   onModeChange,
   onBacktestStrategyChange,
   onBacktestRunChange,
+  onDeleteBacktestRun,
 }: TraderDataScopeSectionProps) {
   const { tx } = useI18n();
 
@@ -74,27 +78,41 @@ export default function TraderDataScopeSection({
 
           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>{tx('回测 Run ID', 'Backtest Run ID')}</div>
           {backtestRuns.length > 0 ? (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {backtestRuns.map((runId) => {
-                const report = backtestRunReports[runId];
-                const rangeText =
-                  report && report.backtest_start && report.backtest_end
-                    ? `${shortDate(report.backtest_start)} ~ ${shortDate(report.backtest_end)}`
-                    : null;
+            <>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {backtestRuns.map((runId) => {
+                  const report = backtestRunReports[runId];
+                  const rangeText =
+                    report && report.backtest_start && report.backtest_end
+                      ? `${shortDate(report.backtest_start)} ~ ${shortDate(report.backtest_end)}`
+                      : null;
 
-                return (
-                  <button
-                    key={runId}
-                    className={`btn ${selectedBacktestRunId === runId ? 'btn-primary' : ''}`}
-                    onClick={() => onBacktestRunChange(runId)}
-                    style={{ padding: '4px 8px', fontSize: 12 }}
-                    title={rangeText ? `${runId} (${rangeText})` : runId}
-                  >
-                    {runId}
-                  </button>
-                );
-              })}
-            </div>
+                  return (
+                    <button
+                      key={runId}
+                      className={`btn ${selectedBacktestRunId === runId ? 'btn-primary' : ''}`}
+                      onClick={() => onBacktestRunChange(runId)}
+                      style={{ padding: '4px 8px', fontSize: 12 }}
+                      title={rangeText ? `${runId} (${rangeText})` : runId}
+                    >
+                      {runId}
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ marginTop: 10 }}>
+                <button
+                  className="btn btn-danger"
+                  onClick={() => selectedBacktestRunId && onDeleteBacktestRun(selectedBacktestRunId)}
+                  disabled={!selectedBacktestRunId || deletingBacktestRunId !== null}
+                  style={{ padding: '4px 8px', fontSize: 12 }}
+                >
+                  {deletingBacktestRunId
+                    ? tx('删除中...', 'Deleting...')
+                    : tx('删除当前回测', 'Delete Selected Backtest')}
+                </button>
+              </div>
+            </>
           ) : (
             <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>
               {selectedBacktestStrategyFilename

@@ -58,3 +58,31 @@ def test_get_strategy_path_backtest_mode_can_ignore_active(tmp_path):
 
     selected = store.get_strategy_path(trader_id, require_active=False)
     assert selected.endswith("a_first.py")
+
+
+def test_delete_trade_run_removes_run_data(tmp_path):
+    base_dir = str(tmp_path / "traders")
+    trader_id = "t3"
+    run_id = "run-001"
+    _prepare_trader(base_dir, trader_id, active_strategy="")
+    store = TraderStore(base_dir=base_dir)
+
+    store.save_trades(trader_id, run_id, [{"symbol": "AAPL"}], mode="backtest")
+    store.save_report(trader_id, run_id, {"trader_id": trader_id}, mode="backtest")
+    store.append_portfolio_snapshot(
+        trader_id,
+        "backtest",
+        {"date": "2026-03-30", "cash": 100000.0, "positions": {}},
+        run_id=run_id,
+    )
+
+    assert run_id in store.list_trade_runs(trader_id, "backtest")
+    assert store.load_report(trader_id, run_id, mode="backtest") is not None
+    assert store.load_portfolio(trader_id, "backtest", run_id=run_id) is not None
+
+    deleted = store.delete_trade_run(trader_id, run_id, mode="backtest")
+
+    assert deleted is True
+    assert run_id not in store.list_trade_runs(trader_id, "backtest")
+    assert store.load_report(trader_id, run_id, mode="backtest") is None
+    assert store.load_portfolio(trader_id, "backtest", run_id=run_id) is None

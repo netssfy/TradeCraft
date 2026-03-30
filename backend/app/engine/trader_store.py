@@ -189,6 +189,45 @@ class TraderStore:
                 run_ids.add(entry[:-5])
         return sorted(run_ids)
 
+    def delete_trade_run(self, name: str, run_id: str, mode: str = "backtest") -> bool:
+        """删除指定 run 的交易与报告文件；返回是否删除到内容。"""
+        deleted = False
+
+        run_dir = self.trade_run_dir(name, mode, run_id)
+        if os.path.isdir(run_dir):
+            shutil.rmtree(run_dir)
+            deleted = True
+
+        legacy_trades = os.path.join(self.trades_dir(name, mode), f"{run_id}.json")
+        if os.path.exists(legacy_trades):
+            os.remove(legacy_trades)
+            deleted = True
+
+        legacy_report = os.path.join(self.trades_dir(name, mode), f"{run_id}_report.json")
+        if os.path.exists(legacy_report):
+            os.remove(legacy_report)
+            deleted = True
+
+        if mode == "backtest":
+            run_portfolio_path = self._portfolio_path(name, mode, run_id=run_id)
+            if os.path.exists(run_portfolio_path):
+                os.remove(run_portfolio_path)
+                deleted = True
+
+            # Backward compatibility: clean run rows from legacy portfolio/backtest.json.
+            legacy_backtest_path = self._portfolio_path(name, mode)
+            if os.path.exists(legacy_backtest_path):
+                with open(legacy_backtest_path, "r", encoding="utf-8") as f:
+                    records = json.load(f)
+                if isinstance(records, list):
+                    filtered = [r for r in records if r.get("run_id") != run_id]
+                    if len(filtered) != len(records):
+                        with open(legacy_backtest_path, "w", encoding="utf-8") as f:
+                            json.dump(filtered, f, ensure_ascii=False, indent=2)
+                        deleted = True
+
+        return deleted
+
     # ------------------------------------------------------------------
     # 持仓快照
     # ------------------------------------------------------------------

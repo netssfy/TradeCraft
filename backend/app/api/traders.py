@@ -435,6 +435,21 @@ def get_backtest_report(trader_id: str, run_id: str):
         raise HTTPException(status_code=422, detail=f"Invalid backtest report format: {run_id}")
 
 
+@router.delete(
+    "/{trader_id}/backtest/run/{run_id}",
+    status_code=204,
+    summary="Delete one backtest run",
+)
+def delete_backtest_run(trader_id: str, run_id: str):
+    _assert_exists(trader_id)
+    if run_id not in store.list_trade_runs(trader_id, "backtest"):
+        raise HTTPException(status_code=404, detail=f"Backtest run not found: {run_id}")
+    deleted = store.delete_trade_run(trader_id, run_id, mode="backtest")
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Backtest run not found: {run_id}")
+    return None
+
+
 @router.post(
     "/{trader_id}/backtest/run",
     response_model=BacktestRunResult,

@@ -74,6 +74,9 @@ export const api = {
   getBacktestReport: (id: string, runId: string) =>
     request<BacktestReport>(`/traders/${id}/backtest/report/${runId}`),
 
+  deleteBacktestRun: (id: string, runId: string) =>
+    request<void>(`/traders/${id}/backtest/run/${runId}`, { method: 'DELETE' }),
+
   runBacktest: (
     id: string,
     range?: { start_date?: string; end_date?: string; strategy_filename?: string }
