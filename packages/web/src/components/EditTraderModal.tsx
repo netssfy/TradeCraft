@@ -1,6 +1,7 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import type { Trader, UpdateTraderRequest } from '@tradecraft/shared/types';
 import { TRAIT_LABELS } from '@tradecraft/shared/utils';
+import { useI18n } from '../hooks/useI18n';
 import { api } from '../services/api';
 
 interface EditTraderModalProps {
@@ -10,6 +11,7 @@ interface EditTraderModalProps {
 }
 
 export default function EditTraderModal({ trader, onClose, onUpdated }: EditTraderModalProps) {
+  const { tx } = useI18n();
   const [form, setForm] = useState<UpdateTraderRequest>({
     initial_cash: trader.initial_cash,
     allowed_symbols: trader.allowed_symbols,
@@ -64,18 +66,14 @@ export default function EditTraderModal({ trader, onClose, onUpdated }: EditTrad
       }}
       onClick={onClose}
     >
-      <div
-        className="card"
-        style={{ width: '90%', maxWidth: 520, maxHeight: '90vh', overflow: 'auto' }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 16 }}>编辑交易员</h2>
+      <div className="card" style={{ width: '90%', maxWidth: 520, maxHeight: '90vh', overflow: 'auto' }} onClick={(e) => e.stopPropagation()}>
+        <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 16 }}>{tx('编辑交易员', 'Edit Trader')}</h2>
 
         {error && <div className="error-message" style={{ marginBottom: 16 }}>{error}</div>}
 
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label className="label">初始资金</label>
+            <label className="label">{tx('初始资金', 'Initial Cash')}</label>
             <input
               className="input mono"
               type="number"
@@ -86,31 +84,23 @@ export default function EditTraderModal({ trader, onClose, onUpdated }: EditTrad
           </div>
 
           <div className="form-group">
-            <label className="label">允许标的</label>
+            <label className="label">{tx('允许标的', 'Allowed Symbols')}</label>
             <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
               <input
                 className="input"
                 value={symbolInput}
                 onChange={(e) => setSymbolInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addSymbol())}
-                placeholder="输入股票代码，回车添加"
+                placeholder={tx('输入股票代码后回车添加', 'Type symbol and press Enter')}
                 disabled={saving}
               />
               <button type="button" className="btn" onClick={addSymbol} disabled={saving}>
-                添加
+                {tx('添加', 'Add')}
               </button>
             </div>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               {(form.allowed_symbols || []).map((sym) => (
-                <span
-                  key={sym}
-                  className="badge"
-                  style={{
-                    background: 'var(--bg-tertiary)',
-                    cursor: 'pointer',
-                  }}
-                  onClick={() => !saving && removeSymbol(sym)}
-                >
+                <span key={sym} className="badge" style={{ background: 'var(--bg-tertiary)', cursor: 'pointer' }} onClick={() => !saving && removeSymbol(sym)}>
                   {sym} ×
                 </span>
               ))}
@@ -118,7 +108,7 @@ export default function EditTraderModal({ trader, onClose, onUpdated }: EditTrad
           </div>
 
           <div className="form-group">
-            <label className="label">手续费率</label>
+            <label className="label">{tx('手续费率', 'Commission Rate')}</label>
             <input
               className="input mono"
               type="number"
@@ -130,7 +120,7 @@ export default function EditTraderModal({ trader, onClose, onUpdated }: EditTrad
           </div>
 
           <div className="form-group">
-            <label className="label">订单超时（秒）</label>
+            <label className="label">{tx('订单超时（秒）', 'Order Timeout (seconds)')}</label>
             <input
               className="input mono"
               type="number"
@@ -140,30 +130,31 @@ export default function EditTraderModal({ trader, onClose, onUpdated }: EditTrad
             />
           </div>
 
-          <div className="label" style={{ marginBottom: 8 }}>六维特质</div>
-          {form.traits && Object.entries(form.traits).map(([key, value]) => (
-            <div key={key} className="form-group">
-              <label className="label">{TRAIT_LABELS[key] || key}</label>
-              <input
-                className="input"
-                value={value}
-                onChange={(e) =>
-                  setForm((f) => ({
-                    ...f,
-                    traits: { ...f.traits!, [key]: e.target.value },
-                  }))
-                }
-                disabled={saving}
-              />
-            </div>
-          ))}
+          <div className="label" style={{ marginBottom: 8 }}>{tx('六维特质', 'Traits')}</div>
+          {form.traits &&
+            Object.entries(form.traits).map(([key, value]) => (
+              <div key={key} className="form-group">
+                <label className="label">{TRAIT_LABELS[key] || key}</label>
+                <input
+                  className="input"
+                  value={value}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      traits: { ...f.traits!, [key]: e.target.value },
+                    }))
+                  }
+                  disabled={saving}
+                />
+              </div>
+            ))}
 
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 24 }}>
             <button type="button" className="btn" onClick={onClose} disabled={saving}>
-              取消
+              {tx('取消', 'Cancel')}
             </button>
             <button type="submit" className="btn btn-primary" disabled={saving}>
-              {saving ? '保存中...' : '保存'}
+              {saving ? tx('保存中...', 'Saving...') : tx('保存', 'Save')}
             </button>
           </div>
         </form>

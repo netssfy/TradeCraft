@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { Portfolio, TradeRuns, Trader } from '@tradecraft/shared/types';
-import { api } from '../services/api';
-import LoadingSpinner from '../components/LoadingSpinner';
-import ErrorMessage from '../components/ErrorMessage';
 import { TRAIT_LABELS, formatCurrency } from '@tradecraft/shared/utils';
+import ErrorMessage from '../components/ErrorMessage';
+import LoadingSpinner from '../components/LoadingSpinner';
+import { useI18n } from '../hooks/useI18n';
+import { api } from '../services/api';
 
 interface CombinationResult {
   id: string;
@@ -25,8 +26,7 @@ function getSnapshotReturn(portfolio: Portfolio | null, initialCash: number): nu
   }
 
   const last = portfolio.snapshots[portfolio.snapshots.length - 1];
-  const totalValue =
-    last.cash + Object.values(last.positions).reduce((sum, p) => sum + p.quantity * p.avg_cost, 0);
+  const totalValue = last.cash + Object.values(last.positions).reduce((sum, p) => sum + p.quantity * p.avg_cost, 0);
 
   return ((totalValue - initialCash) / initialCash) * 100;
 }
@@ -42,6 +42,7 @@ function buildBacktestCombinationIds(runs: TradeRuns | null): string[] {
 }
 
 export default function TraderListPage() {
+  const { tx } = useI18n();
   const [rows, setRows] = useState<TraderRowData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -94,17 +95,11 @@ export default function TraderListPage() {
           return b.paperReturn - a.paperReturn;
         });
 
-        if (!cancelled) {
-          setRows(list);
-        }
+        if (!cancelled) setRows(list);
       } catch (e: any) {
-        if (!cancelled) {
-          setError(e.message);
-        }
+        if (!cancelled) setError(e.message);
       } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
+        if (!cancelled) setLoading(false);
       }
     };
 
@@ -116,15 +111,15 @@ export default function TraderListPage() {
   }, []);
 
   if (loading) return <LoadingSpinner />;
-  if (error) return <ErrorMessage message={`Load failed: ${error}`} />;
+  if (error) return <ErrorMessage message={`${tx('加载失败', 'Load failed')}: ${error}`} />;
 
   if (rows.length === 0) {
     return (
       <div className="empty-state">
-        <h3>No traders yet</h3>
-        <p style={{ marginBottom: 16 }}>Create your first AI trader to begin.</p>
+        <h3>{tx('暂无交易员', 'No traders yet')}</h3>
+        <p style={{ marginBottom: 16 }}>{tx('创建你的第一个 AI 交易员开始观测。', 'Create your first AI trader to begin.')}</p>
         <Link to="/traders/create" className="btn btn-primary">
-          Create trader
+          {tx('创建交易员', 'Create trader')}
         </Link>
       </div>
     );
@@ -133,18 +128,18 @@ export default function TraderListPage() {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 600 }}>Trader List</h1>
+        <h1 style={{ fontSize: 24, fontWeight: 600 }}>{tx('交易员列表', 'Trader List')}</h1>
         <Link to="/traders/create" className="btn btn-primary">
-          + Create trader
+          + {tx('创建交易员', 'Create trader')}
         </Link>
       </div>
 
       <div className="trader-table">
         <div className="trader-table-head">
-          <div>Trader</div>
-          <div>Traits</div>
-          <div>Strategies</div>
-          <div>Combinations</div>
+          <div>{tx('交易员', 'Trader')}</div>
+          <div>{tx('特性', 'Traits')}</div>
+          <div>{tx('策略', 'Strategies')}</div>
+          <div>{tx('组合结果', 'Combinations')}</div>
         </div>
 
         {rows.map(({ trader, strategyNames, combinations, paperReturn }) => (
@@ -162,7 +157,7 @@ export default function TraderListPage() {
               </div>
 
               <div style={{ marginTop: 8, color: 'var(--text-muted)', fontSize: 12 }}>
-                Initial cash: <span className="mono">{formatCurrency(trader.initial_cash)}</span>
+                {tx('初始资金', 'Initial cash')}: <span className="mono">{formatCurrency(trader.initial_cash)}</span>
               </div>
             </div>
 
@@ -178,7 +173,7 @@ export default function TraderListPage() {
 
             <div className="trader-cell">
               {strategyNames.length === 0 ? (
-                <span style={{ color: 'var(--text-muted)' }}>No strategy</span>
+                <span style={{ color: 'var(--text-muted)' }}>{tx('暂无策略', 'No strategy')}</span>
               ) : (
                 <div className="strategy-scroll-list">
                   {strategyNames.map((name) => (

@@ -454,6 +454,29 @@ tr:hover td {
   opacity: 1;
 }
 
+.lang-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--btn-bg);
+}
+
+.lang-toggle__btn {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 5px 10px;
+  min-width: 42px;
+}
+
+.lang-toggle__btn--active {
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+}
+
 @media (max-width: 768px) {
   .container {
     padding: 0 16px;

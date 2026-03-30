@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+﻿import { useEffect, useRef, useState } from 'react';
 import type { StrategyFile } from '@tradecraft/shared/types';
+import { useI18n } from '../hooks/useI18n';
 import { api, researchStrategySSE } from '../services/api';
 import LoadingSpinner from './LoadingSpinner';
 import StreamMessagePanel, { type StreamMessage, type StreamMessageType } from './StreamMessagePanel';
@@ -24,6 +25,7 @@ function inferMessageType(message: string): StreamMessageType {
 }
 
 export default function StrategyManager({ traderId, onUpdate }: StrategyManagerProps) {
+  const { tx } = useI18n();
   const nextMessageIdRef = useRef(1);
 
   const [strategies, setStrategies] = useState<StrategyFile[]>([]);
@@ -96,7 +98,7 @@ export default function StrategyManager({ traderId, onUpdate }: StrategyManagerP
   const handleSetActive = async (filename: string) => {
     try {
       await api.setActiveStrategy(traderId, filename);
-      appendMessage('result', `Strategy activated: ${filename}`);
+      appendMessage('result', `${tx('已激活策略', 'Strategy activated')}: ${filename}`);
       load();
       onUpdate();
     } catch (e: any) {
@@ -107,7 +109,7 @@ export default function StrategyManager({ traderId, onUpdate }: StrategyManagerP
 
   const handleResearch = async (mode: 'create' | 'update') => {
     if (mode === 'update' && !selectedStrategy) {
-      setError('No strategy selected.');
+      setError(tx('请先选择策略。', 'Please select a strategy first.'));
       return;
     }
 
@@ -116,24 +118,28 @@ export default function StrategyManager({ traderId, onUpdate }: StrategyManagerP
     setError(null);
 
     try {
-      await researchStrategySSE(traderId, {
-        onLog: (msg) => appendLogLine(msg),
-        onResult: (data) => {
-          const list = data.strategies.length ? data.strategies.join(', ') : '(none)';
-          appendMessage('result', `Research completed. Generated strategies: ${list}`);
-          load();
-          onUpdate();
-          setResearching(false);
+      await researchStrategySSE(
+        traderId,
+        {
+          onLog: (msg) => appendLogLine(msg),
+          onResult: (data) => {
+            const list = data.strategies.length ? data.strategies.join(', ') : tx('（无）', '(none)');
+            appendMessage('result', `${tx('研究完成，生成策略', 'Research completed. Generated strategies')}: ${list}`);
+            load();
+            onUpdate();
+            setResearching(false);
+          },
+          onError: (msg) => {
+            appendMessage('error', msg);
+            setError(msg);
+            setResearching(false);
+          },
         },
-        onError: (msg) => {
-          appendMessage('error', msg);
-          setError(msg);
-          setResearching(false);
-        },
-      }, {
-        mode,
-        target: mode === 'update' ? selectedStrategy ?? undefined : undefined,
-      });
+        {
+          mode,
+          target: mode === 'update' ? selectedStrategy ?? undefined : undefined,
+        }
+      );
     } catch (e: any) {
       appendMessage('error', e.message);
       setError(e.message);
@@ -146,25 +152,21 @@ export default function StrategyManager({ traderId, onUpdate }: StrategyManagerP
   return (
     <div className="card">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <div className="label" style={{ margin: 0 }}>Strategy Files</div>
+        <div className="label" style={{ margin: 0 }}>{tx('策略文件', 'Strategy Files')}</div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn btn-primary" onClick={() => handleResearch('create')} disabled={researching}>
-            {researching ? 'Researching...' : 'Create New Strategy'}
+            {researching ? tx('研究中...', 'Researching...') : tx('新建策略', 'Create New Strategy')}
           </button>
           <button className="btn" onClick={() => handleResearch('update')} disabled={researching || !selectedStrategy}>
-            {researching ? 'Researching...' : 'Update Selected Strategy'}
+            {researching ? tx('研究中...', 'Researching...') : tx('更新已选策略', 'Update Selected Strategy')}
           </button>
         </div>
       </div>
 
-      {error && (
-        <div className="error-message" style={{ marginBottom: 12 }}>
-          {error}
-        </div>
-      )}
+      {error && <div className="error-message" style={{ marginBottom: 12 }}>{error}</div>}
 
       {strategies.length === 0 ? (
-        <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 20 }}>No strategy files yet.</div>
+        <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 20 }}>{tx('暂无策略文件。', 'No strategy files yet.')}</div>
       ) : (
         <div>
           {strategies.map((s) => (
@@ -183,12 +185,12 @@ export default function StrategyManager({ traderId, onUpdate }: StrategyManagerP
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span className="mono" style={{ fontSize: 13 }}>{s.filename}</span>
-                {s.is_active && <span className="badge badge-green">Active</span>}
-                {selectedStrategy === s.filename && <span className="badge">Selected</span>}
+                {s.is_active && <span className="badge badge-green">{tx('激活中', 'Active')}</span>}
+                {selectedStrategy === s.filename && <span className="badge">{tx('已选择', 'Selected')}</span>}
               </div>
               {!s.is_active && (
                 <button className="btn" onClick={() => handleSetActive(s.filename)} style={{ padding: '4px 8px', fontSize: 12 }}>
-                  Set Active
+                  {tx('设为激活', 'Set Active')}
                 </button>
               )}
             </div>
@@ -196,7 +198,7 @@ export default function StrategyManager({ traderId, onUpdate }: StrategyManagerP
         </div>
       )}
 
-      <StreamMessagePanel title="Research Stream Messages" messages={messages} />
+      <StreamMessagePanel title={tx('研究流消息', 'Research Stream Messages')} messages={messages} />
     </div>
   );
 }
