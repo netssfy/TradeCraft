@@ -12,6 +12,7 @@ class Report:
     backtest_end: datetime
     initial_cash: float
     final_nav: float
+    strategy_filename: str | None
     metrics: dict
 
     def to_json(self) -> str:
@@ -21,6 +22,7 @@ class Report:
             "backtest_end": self.backtest_end.isoformat(),
             "initial_cash": self.initial_cash,
             "final_nav": self.final_nav,
+            "strategy_filename": self.strategy_filename,
             "metrics": self.metrics,
         }
         return json.dumps(data, ensure_ascii=False)
@@ -34,5 +36,6 @@ class Report:
             backtest_end=datetime.fromisoformat(data["backtest_end"]),
             initial_cash=data["initial_cash"],
             final_nav=data["final_nav"],
+            strategy_filename=data.get("strategy_filename"),
             metrics=data["metrics"],
         )

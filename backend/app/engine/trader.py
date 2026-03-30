@@ -43,6 +43,7 @@ class Trader:
         commission_rate: float = 0.0003,
         order_timeout_seconds: int = 300,
         traits: Optional[dict] = None,
+        strategy_filename: Optional[str] = None,
     ) -> None:
         self.id = id
         self.market = market
@@ -55,6 +56,7 @@ class Trader:
         self.commission_rate = commission_rate
         self.order_timeout_seconds = order_timeout_seconds
         self.traits: dict = traits or {}
+        self.strategy_filename = strategy_filename
 
     # ------------------------------------------------------------------
     # Factory — 从 trader 目录加载
@@ -142,6 +144,7 @@ class Trader:
             commission_rate=commission_rate,
             order_timeout_seconds=order_timeout_seconds,
             traits=traits,
+            strategy_filename=os.path.basename(strategy_path),
         )
 
     # ------------------------------------------------------------------

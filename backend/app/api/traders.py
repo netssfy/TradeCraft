@@ -98,6 +98,7 @@ class BacktestReportModel(BaseModel):
     backtest_end: str
     initial_cash: float
     final_nav: float
+    strategy_filename: Optional[str] = None
     metrics: BacktestMetricsModel
 
 

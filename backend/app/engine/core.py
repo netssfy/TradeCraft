@@ -515,6 +515,7 @@ class Engine:
                 backtest_end=backtest_end,
                 initial_cash=initial_cash,
                 final_nav=final_nav,
+                strategy_filename=getattr(trader, "strategy_filename", None),
                 metrics=metrics_dict,
             )
 

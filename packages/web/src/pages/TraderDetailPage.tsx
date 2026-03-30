@@ -5,8 +5,11 @@ import { TRAIT_LABELS, formatCurrency } from '@tradecraft/shared/utils';
 import EditTraderModal from '../components/EditTraderModal';
 import ErrorMessage from '../components/ErrorMessage';
 import LoadingSpinner from '../components/LoadingSpinner';
-import PortfolioChart from '../components/PortfolioChart';
-import StrategyManager from '../components/StrategyManager';
+import TraderDataScopeSection from '../components/TraderDataScopeSection';
+import TraderPortfolioSection from '../components/TraderPortfolioSection';
+import TraderPositionsSection from '../components/TraderPositionsSection';
+import TraderStrategySection from '../components/TraderStrategySection';
+import TraderTradesSection from '../components/TraderTradesSection';
 import { api } from '../services/api';
 
 type Mode = 'paper' | 'backtest';
@@ -236,6 +239,10 @@ export default function TraderDetailPage() {
 
   const formatPercent = (value: number) => `${(value * 100).toFixed(2)}%`;
   const shortDate = (value: string) => value.split('T')[0] || value;
+  const handleStrategyUpdate = () => {
+    if (!trader) return Promise.resolve();
+    return Promise.all([api.getTrader(trader.id).then(setTrader), refreshStrategyFiles(trader.id)]).then(() => undefined);
+  };
 
   if (loading) return <LoadingSpinner />;
 
@@ -312,224 +319,85 @@ export default function TraderDetailPage() {
         </div>
       </div>
 
-      <StrategyManager
-        traderId={trader.id}
-        onUpdate={() => Promise.all([api.getTrader(trader.id).then(setTrader), refreshStrategyFiles(trader.id)]).then(() => undefined)}
-      />
+      <div className="trader-detail-layout">
+        <aside className="trader-detail-sidebar">
+          <TraderStrategySection traderId={trader.id} onUpdate={handleStrategyUpdate} />
+          <TraderDataScopeSection
+            mode={mode}
+            tradeRuns={tradeRuns}
+            selectedBacktestRunId={selectedBacktestRunId}
+            selectedPaperRunId={selectedPaperRunId}
+            onModeChange={setMode}
+            onBacktestRunChange={setSelectedBacktestRunId}
+          />
+        </aside>
 
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <div className="label" style={{ margin: 0 }}>数据范围</div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <button
-              className={`btn ${mode === 'paper' ? 'btn-primary' : ''}`}
-              onClick={() => setMode('paper')}
-              style={{ padding: '4px 12px', fontSize: 12 }}
-            >
-              模拟盘
-            </button>
-            <button
-              className={`btn ${mode === 'backtest' ? 'btn-primary' : ''}`}
-              onClick={() => setMode('backtest')}
-              style={{ padding: '4px 12px', fontSize: 12 }}
-            >
-              回测
-            </button>
-          </div>
-        </div>
+        <section className="trader-detail-main">
+          <TraderPortfolioSection
+            mode={mode}
+            selectedBacktestRunId={selectedBacktestRunId}
+            dataLoading={dataLoading}
+            portfolioError={portfolioError}
+            portfolio={portfolio}
+            initialCash={trader.initial_cash}
+          />
 
-        {mode === 'backtest' && (
-          <div style={{ marginTop: 12 }}>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>回测 Run ID</div>
-            {tradeRuns && tradeRuns.backtest.length > 0 ? (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {tradeRuns.backtest.map((runId) => (
-                  <button
-                    key={runId}
-                    className={`btn ${selectedBacktestRunId === runId ? 'btn-primary' : ''}`}
-                    onClick={() => setSelectedBacktestRunId(runId)}
-                    style={{ padding: '4px 8px', fontSize: 12 }}
-                  >
-                    {runId}
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>暂无回测运行记录。</div>
-            )}
-          </div>
-        )}
-
-        {mode === 'paper' && (
-          <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-muted)' }}>
-            当前模拟盘运行: {selectedPaperRunId || '（无）'}
-          </div>
-        )}
-      </div>
-
-      <div className="card" style={{ marginBottom: 24 }}>
-        <div className="label" style={{ marginBottom: 12 }}>
-          收益曲线 ({mode === 'paper' ? '模拟盘' : `回测 ${selectedBacktestRunId || ''}`})
-        </div>
-        {dataLoading ? (
-          <LoadingSpinner />
-        ) : portfolioError ? (
-          <div style={{ color: 'var(--text-muted)', padding: 20, textAlign: 'center' }}>{portfolioError}</div>
-        ) : portfolio ? (
-          <PortfolioChart portfolio={portfolio} initialCash={trader.initial_cash} />
-        ) : (
-          <div style={{ color: 'var(--text-muted)', padding: 20, textAlign: 'center' }}>暂无数据。</div>
-        )}
-      </div>
-
-      {mode === 'backtest' && (
-        <div className="card" style={{ marginBottom: 24 }}>
-          <div className="label" style={{ marginBottom: 12 }}>回测报告</div>
-          {dataLoading ? (
-            <LoadingSpinner />
-          ) : reportError ? (
-            <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 20 }}>{reportError}</div>
-          ) : backtestReport ? (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
-              <div>
-                <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>回测区间</div>
-                <div className="mono">{shortDate(backtestReport.backtest_start)} ~ {shortDate(backtestReport.backtest_end)}</div>
-              </div>
-              <div>
-                <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>最终净值</div>
-                <div className="mono">{formatCurrency(backtestReport.final_nav)}</div>
-              </div>
-              <div>
-                <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>年化收益率</div>
-                <div className="mono">{formatPercent(backtestReport.metrics.annualized_return)}</div>
-              </div>
-              <div>
-                <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>最大回撤</div>
-                <div className="mono">{formatPercent(backtestReport.metrics.max_drawdown)}</div>
-              </div>
-              <div>
-                <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>夏普比率</div>
-                <div className="mono">{backtestReport.metrics.sharpe_ratio.toFixed(3)}</div>
-              </div>
-              <div>
-                <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>胜率</div>
-                <div className="mono">{formatPercent(backtestReport.metrics.win_rate)}</div>
-              </div>
-              <div>
-                <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>盈亏比</div>
-                <div className="mono">{backtestReport.metrics.profit_loss_ratio.toFixed(3)}</div>
-              </div>
+          {mode === 'backtest' && (
+            <div className="card">
+              <div className="label" style={{ marginBottom: 12 }}>回测报告</div>
+              {dataLoading ? (
+                <LoadingSpinner />
+              ) : reportError ? (
+                <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 20 }}>{reportError}</div>
+              ) : backtestReport ? (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+                  <div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>回测区间</div>
+                    <div className="mono">{shortDate(backtestReport.backtest_start)} ~ {shortDate(backtestReport.backtest_end)}</div>
+                  </div>
+                  <div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>最终净值</div>
+                    <div className="mono">{formatCurrency(backtestReport.final_nav)}</div>
+                  </div>
+                  <div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>年化收益率</div>
+                    <div className="mono">{formatPercent(backtestReport.metrics.annualized_return)}</div>
+                  </div>
+                  <div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>最大回撤</div>
+                    <div className="mono">{formatPercent(backtestReport.metrics.max_drawdown)}</div>
+                  </div>
+                  <div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>夏普比率</div>
+                    <div className="mono">{backtestReport.metrics.sharpe_ratio.toFixed(3)}</div>
+                  </div>
+                  <div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>胜率</div>
+                    <div className="mono">{formatPercent(backtestReport.metrics.win_rate)}</div>
+                  </div>
+                  <div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>盈亏比</div>
+                    <div className="mono">{backtestReport.metrics.profit_loss_ratio.toFixed(3)}</div>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 20 }}>当前回测暂无报告。</div>
+              )}
             </div>
-          ) : (
-            <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 20 }}>当前回测暂无报告。</div>
           )}
-        </div>
-      )}
 
-      <div className="card" style={{ marginBottom: 24 }}>
-        <div className="label" style={{ marginBottom: 12 }}>
-          持仓快照
-        </div>
-        {portfolio && portfolio.snapshots.length > 0 ? (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
-                  <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--text-muted)' }}>日期</th>
-                  <th style={{ textAlign: 'right', padding: '8px 12px', color: 'var(--text-muted)' }}>现金</th>
-                  <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--text-muted)' }}>持仓</th>
-                </tr>
-              </thead>
-              <tbody>
-                {portfolio.snapshots.slice().reverse().map((snap) => (
-                  <tr key={snap.date} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                    <td className="mono" style={{ padding: '8px 12px' }}>{snap.date}</td>
-                    <td className="mono" style={{ padding: '8px 12px', textAlign: 'right' }}>{formatCurrency(snap.cash)}</td>
-                    <td style={{ padding: '8px 12px' }}>
-                      {Object.entries(snap.positions).map(([sym, pos]) => (
-                        <span key={sym} style={{ marginRight: 12 }}>
-                          {sym}: <span className="mono">{pos.quantity}</span> @ <span className="mono">{formatCurrency(pos.avg_cost)}</span>
-                        </span>
-                      ))}
-                      {Object.keys(snap.positions).length === 0 && (
-                        <span style={{ color: 'var(--text-muted)' }}>空仓</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 20 }}>
-            {portfolioError || '暂无持仓数据。'}
-          </div>
-        )}
-      </div>
+          <TraderPositionsSection portfolio={portfolio} portfolioError={portfolioError} />
 
-      <div className="card" style={{ marginBottom: 24 }}>
-        <div className="label" style={{ marginBottom: 12 }}>
-          成交记录
-        </div>
-
-        {trades && trades.length > 0 && (
-          <>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
-                    <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--text-muted)' }}>时间</th>
-                    <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--text-muted)' }}>标的</th>
-                    <th style={{ textAlign: 'center', padding: '8px 12px', color: 'var(--text-muted)' }}>方向</th>
-                    <th style={{ textAlign: 'right', padding: '8px 12px', color: 'var(--text-muted)' }}>数量</th>
-                    <th style={{ textAlign: 'right', padding: '8px 12px', color: 'var(--text-muted)' }}>价格</th>
-                    <th style={{ textAlign: 'right', padding: '8px 12px', color: 'var(--text-muted)' }}>手续费</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pagedTrades.map((trade, i) => (
-                    <tr key={`${trade.timestamp}-${trade.symbol}-${i}`} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                      <td className="mono" style={{ padding: '8px 12px' }}>{trade.timestamp}</td>
-                      <td style={{ padding: '8px 12px' }}>{trade.symbol}</td>
-                      <td style={{ padding: '8px 12px', textAlign: 'center' }}>
-                        <span className={`badge ${trade.direction === 'buy' ? 'badge-green' : 'badge-red'}`}>
-                          {trade.direction === 'buy' ? '买入' : '卖出'}
-                        </span>
-                      </td>
-                      <td className="mono" style={{ padding: '8px 12px', textAlign: 'right' }}>{trade.quantity}</td>
-                      <td className="mono" style={{ padding: '8px 12px', textAlign: 'right' }}>{formatCurrency(trade.price)}</td>
-                      <td className="mono" style={{ padding: '8px 12px', textAlign: 'right' }}>{formatCurrency(trade.commission)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                第 {tradesPage} / {totalTradePages} 页（共 {trades.length} 条）
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button className="btn" disabled={tradesPage <= 1} onClick={() => setTradesPage((p) => Math.max(1, p - 1))}>
-                  上一页
-                </button>
-                <button
-                  className="btn"
-                  disabled={tradesPage >= totalTradePages}
-                  onClick={() => setTradesPage((p) => Math.min(totalTradePages, p + 1))}
-                >
-                  下一页
-                </button>
-              </div>
-            </div>
-          </>
-        )}
-
-        {trades && trades.length === 0 && (
-          <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 20 }}>当前选择暂无成交记录。</div>
-        )}
-
-        {trades === null && dataLoading && <LoadingSpinner />}
+          <TraderTradesSection
+            trades={trades}
+            pagedTrades={pagedTrades}
+            tradesPage={tradesPage}
+            totalTradePages={totalTradePages}
+            dataLoading={dataLoading}
+            onPrevPage={() => setTradesPage((p) => Math.max(1, p - 1))}
+            onNextPage={() => setTradesPage((p) => Math.min(totalTradePages, p + 1))}
+          />
+        </section>
       </div>
 
       {showBacktestConfig && (

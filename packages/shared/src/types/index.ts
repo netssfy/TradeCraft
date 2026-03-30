@@ -86,5 +86,6 @@ export interface BacktestReport {
   backtest_end: string;
   initial_cash: number;
   final_nav: number;
+  strategy_filename?: string | null;
   metrics: BacktestMetrics;
 }
