@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
@@ -18,6 +18,8 @@ class MarketRepository:
 
     def __init__(self, base_path: str = "data/market") -> None:
         self.base_path = base_path
+        self._parquet_cache: Dict[str, Tuple[float, pd.DataFrame]] = {}
+        self._parquet_cache_max = 256
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -74,13 +76,26 @@ class MarketRepository:
         """Read a single parquet file; return empty DataFrame if not found."""
         if not os.path.exists(path):
             return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
+        mtime = os.path.getmtime(path)
+        cached = self._parquet_cache.get(path)
+        if cached and cached[0] == mtime:
+            return cached[1]
         df = pd.read_parquet(path)
         df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+        self._cache_parquet(path, mtime, df)
         return df
 
     def _write_parquet(self, path: str, df: pd.DataFrame) -> None:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         df.to_parquet(path, index=False)
+        mtime = os.path.getmtime(path)
+        self._cache_parquet(path, mtime, df)
+
+    def _cache_parquet(self, path: str, mtime: float, df: pd.DataFrame) -> None:
+        self._parquet_cache[path] = (mtime, df)
+        if len(self._parquet_cache) > self._parquet_cache_max:
+            oldest_key = next(iter(self._parquet_cache))
+            self._parquet_cache.pop(oldest_key, None)
 
     # ------------------------------------------------------------------
     # Public API

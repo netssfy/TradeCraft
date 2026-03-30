@@ -11,6 +11,15 @@
             "program": "${workspaceFolder}/backend/run.py",
             "cwd": "${workspaceFolder}/backend",
             "console": "integratedTerminal"
+        },
+        {
+            "name": "Run Server",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/backend/server.py",
+            "cwd": "${workspaceFolder}/backend",
+            "console": "integratedTerminal",
+            "python": "${workspaceFolder}/.venv/Scripts/python.exe"
         }
     ]
 }

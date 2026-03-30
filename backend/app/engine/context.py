@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from bisect import bisect_left
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 from app.data.market import BarInterval
 from app.data.repository import MarketRepository
@@ -9,6 +10,9 @@ from app.engine.models import Bar, Order, OrderType
 
 if TYPE_CHECKING:
     from app.engine.portfolio import Portfolio
+
+
+_HISTORY_SERIES_CACHE: Dict[Tuple[int, str, str, str], Tuple[List[datetime], List[Bar]]] = {}
 
 
 class Context:
@@ -95,22 +99,32 @@ class Context:
         else:
             end = self._current_time.astimezone(timezone.utc)
 
-        # Use a far-past UTC datetime without pandas nanosecond conversion warnings.
-        start = datetime(1900, 1, 1, tzinfo=timezone.utc)
+        market = self._trader.market  # type: ignore[attr-defined]
+        cache_key = (id(self._repository), market.value, symbol, interval.value)
+        cached = _HISTORY_SERIES_CACHE.get(cache_key)
 
-        bars = self._repository.read(
-            symbol=symbol,
-            market=self._trader.market,  # type: ignore[attr-defined]
-            interval=interval,
-            start=start,
-            end=end,
-        )
+        # Load full local series once, then serve history slices with binary search.
+        # This removes repeated parquet scans for every on_bar callback.
+        if cached is None or (cached[0] and end > cached[0][-1]):
+            series = self._repository.read(
+                symbol=symbol,
+                market=market,
+                interval=interval,
+                start=datetime(1900, 1, 1, tzinfo=timezone.utc),
+                end=datetime(2100, 1, 1, tzinfo=timezone.utc),
+            )
+            times = [_bar_timestamp_utc(b) for b in series]
+            cached = (times, series)
+            _HISTORY_SERIES_CACHE[cache_key] = cached
 
-        # Filter: strictly before current_time (exclude the current bar itself)
-        bars = [b for b in bars if _bar_timestamp_utc(b) < end]
+        times, series = cached
+        if not times:
+            return []
 
-        # Return the last n bars (most recent), ascending order
-        return bars[-n:] if n < len(bars) else bars
+        # Find first index where timestamp >= end, so result is strictly before end.
+        idx = bisect_left(times, end)
+        start_idx = max(0, idx - n)
+        return series[start_idx:idx]
 
 
 def _bar_timestamp_utc(bar: Bar) -> datetime:
