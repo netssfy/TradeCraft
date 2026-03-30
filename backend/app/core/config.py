@@ -38,7 +38,7 @@ class LoggingConfig:
 class TraderConfig:
     id: str = ""
     market: str = "CN"
-    initial_cash: float = 100000.0
+    initial_cash: float = 1000000.0
     allowed_symbols: Optional[List[str]] = None
     strategy_path: str = ""
     strategy_params: Dict[str, Any] = field(default_factory=dict)
@@ -188,7 +188,7 @@ def _dict_to_config(data: Dict) -> Config:
             TraderConfig(
                 id=t.get("id", ""),
                 market=t.get("market", "CN"),
-                initial_cash=float(t.get("initial_cash", 100000.0)),
+                initial_cash=float(t.get("initial_cash", 1000000.0)),
                 allowed_symbols=t.get("allowed_symbols", None),
                 strategy_path=t.get("strategy_path", ""),
                 strategy_params=t.get("strategy_params", {}),

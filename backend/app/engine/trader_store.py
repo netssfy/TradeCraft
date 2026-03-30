@@ -83,7 +83,12 @@ class TraderStore:
     # 策略文件
     # ------------------------------------------------------------------
 
-    def get_strategy_path(self, name: str, strategy_filename: Optional[str] = None) -> str:
+    def get_strategy_path(
+        self,
+        name: str,
+        strategy_filename: Optional[str] = None,
+        require_active: bool = True,
+    ) -> str:
         """返回 active_strategy 指定的策略文件路径。
         
         优先读取 trader.json 中的 active_strategy 字段；
@@ -103,9 +108,16 @@ class TraderStore:
                 selected = None
 
         if not selected:
-            raise TraderStoreError(
-                f"Trader '{name}' has no active_strategy configured in trader.json"
-            )
+            if require_active:
+                raise TraderStoreError(
+                    f"Trader '{name}' has no active_strategy configured in trader.json"
+                )
+            candidates = sorted(f for f in os.listdir(sdir) if f.endswith(".py"))
+            if not candidates:
+                raise TraderStoreError(
+                    f"Trader '{name}' has no strategy files in {sdir}"
+                )
+            selected = candidates[0]
 
         path = os.path.join(sdir, selected)
         if not os.path.isfile(path):

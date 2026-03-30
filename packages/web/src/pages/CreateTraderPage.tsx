@@ -31,7 +31,7 @@ export default function CreateTraderPage() {
   const [form, setForm] = useState<CreateTraderRequest>({
     id: '',
     market: 'CN',
-    initial_cash: 100000,
+    initial_cash: 1000000,
     allowed_symbols: [],
     commission_rate: 0.001,
     order_timeout_seconds: 300,

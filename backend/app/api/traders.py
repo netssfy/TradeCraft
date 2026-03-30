@@ -485,6 +485,7 @@ def run_backtest_once(trader_id: str, req: BacktestRunRequest):
             repository,
             simulator,
             strategy_filename=strategy_filename,
+            require_active_strategy=False,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

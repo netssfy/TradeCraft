@@ -21,7 +21,7 @@ data_sources:
 traders:
   - id: trader_test
     market: CN
-    initial_cash: 100000.0
+    initial_cash: 1000000.0
     allowed_symbols:
       - "000001.SZ"
     strategy_path: "strategies/test_strategy.py"

@@ -833,7 +833,7 @@ traders:
 
   - id: trader_us_trend
     market: US
-    initial_cash: 100000.0
+    initial_cash: 1000000.0
     allowed_symbols: null   # null 表示该 Market 内无限制
     strategy_path: "strategies/trend_following.py"
     strategy_params:

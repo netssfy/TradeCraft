@@ -68,6 +68,7 @@ class Trader:
         repository: MarketRepository,
         simulator: "Simulator",
         strategy_filename: Optional[str] = None,
+        require_active_strategy: bool = True,
     ) -> "Trader":
         """从 data/traders/{name}/ 目录加载 Trader。
 
@@ -94,7 +95,11 @@ class Trader:
         traits: dict = info.get("traits", {})
 
         # 加载策略
-        strategy_path = store.get_strategy_path(name, strategy_filename=strategy_filename)
+        strategy_path = store.get_strategy_path(
+            name,
+            strategy_filename=strategy_filename,
+            require_active=require_active_strategy,
+        )
         result = StrategyLoader.load(strategy_path)
         if not result.success:
             raise ValueError(f"Failed to load strategy for trader '{name}': {result.error}")

@@ -585,7 +585,13 @@ class Engine:
         traders: List[Trader] = []
         for name in trader_names:
             try:
-                trader = Trader.from_dir(name, store, repository, simulator)
+                trader = Trader.from_dir(
+                    name,
+                    store,
+                    repository,
+                    simulator,
+                    require_active_strategy=(mode == EngineMode.PAPER),
+                )
                 traders.append(trader)
                 logger.info("Loaded trader '%s' from %s", name, store.trader_dir(name))
             except Exception as exc:
