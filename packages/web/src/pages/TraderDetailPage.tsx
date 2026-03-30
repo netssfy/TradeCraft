@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { BacktestReport, Portfolio, StrategyFile, Trade, TradeRuns, Trader } from '@tradecraft/shared/types';
 import { TRAIT_LABELS, formatCurrency } from '@tradecraft/shared/utils';
@@ -17,6 +17,11 @@ type Mode = 'paper' | 'backtest';
 
 const TRADES_PAGE_SIZE = 20;
 
+function matchRunByStrategy(report: BacktestReport | null | undefined, strategyFilename: string | null): boolean {
+  if (!strategyFilename) return true;
+  return (report?.strategy_filename ?? null) === strategyFilename;
+}
+
 export default function TraderDetailPage() {
   const { tx } = useI18n();
   const { id } = useParams<{ id: string }>();
@@ -25,10 +30,12 @@ export default function TraderDetailPage() {
   const [trader, setTrader] = useState<Trader | null>(null);
   const [strategyFiles, setStrategyFiles] = useState<StrategyFile[]>([]);
   const [tradeRuns, setTradeRuns] = useState<TradeRuns | null>(null);
+  const [backtestRunReports, setBacktestRunReports] = useState<Record<string, BacktestReport | null>>({});
 
   const [mode, setMode] = useState<Mode>('paper');
   const [selectedBacktestRunId, setSelectedBacktestRunId] = useState<string | null>(null);
   const [selectedPaperRunId, setSelectedPaperRunId] = useState<string | null>(null);
+  const [selectedBacktestStrategyFilename, setSelectedBacktestStrategyFilename] = useState<string | null>(null);
 
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
   const [trades, setTrades] = useState<Trade[] | null>(null);
@@ -73,9 +80,28 @@ export default function TraderDetailPage() {
 
   const activeRunId = mode === 'backtest' ? selectedBacktestRunId : selectedPaperRunId;
 
+  const loadBacktestRunReports = async (traderId: string, runIds: string[]) => {
+    const reportEntries = await Promise.all(
+      runIds.map(async (runId) => {
+        try {
+          const report = await api.getBacktestReport(traderId, runId);
+          return [runId, report] as const;
+        } catch (e: any) {
+          if (String(e?.message || '').includes('404')) return [runId, null] as const;
+          throw e;
+        }
+      })
+    );
+
+    return Object.fromEntries(reportEntries);
+  };
+
   const refreshRuns = async (traderId: string) => {
     const runs = await api.listTradeRuns(traderId);
     setTradeRuns(runs);
+
+    const reports = await loadBacktestRunReports(traderId, runs.backtest);
+    setBacktestRunReports(reports);
 
     const latestPaper = runs.paper.length > 0 ? runs.paper[runs.paper.length - 1] : null;
     const latestBacktest = runs.backtest.length > 0 ? runs.backtest[runs.backtest.length - 1] : null;
@@ -96,13 +122,45 @@ export default function TraderDetailPage() {
   const refreshStrategyFiles = async (traderId: string) => {
     const files = await api.listStrategies(traderId);
     setStrategyFiles(files);
+
     const active = files.find((s) => s.is_active)?.filename ?? '';
     setBacktestStrategyFilename((prev) => {
       if (prev && files.some((f) => f.filename === prev)) return prev;
       return active;
     });
+
+    setSelectedBacktestStrategyFilename((prev) => {
+      if (prev === null) return null;
+      if (prev && files.some((f) => f.filename === prev)) return prev;
+      return active || null;
+    });
+
     return files;
   };
+
+  const backtestStrategyOptions = useMemo(() => {
+    const fromFiles = strategyFiles.map((s) => s.filename);
+    const fromReports = Object.values(backtestRunReports)
+      .map((report) => report?.strategy_filename ?? null)
+      .filter((filename): filename is string => Boolean(filename));
+    return Array.from(new Set([...fromFiles, ...fromReports]));
+  }, [strategyFiles, backtestRunReports]);
+
+  const filteredBacktestRunIds = useMemo(() => {
+    if (!tradeRuns) return [];
+    return tradeRuns.backtest.filter((runId) =>
+      matchRunByStrategy(backtestRunReports[runId], selectedBacktestStrategyFilename)
+    );
+  }, [tradeRuns, backtestRunReports, selectedBacktestStrategyFilename]);
+
+  useEffect(() => {
+    if (!tradeRuns) return;
+
+    setSelectedBacktestRunId((prev) => {
+      if (prev && filteredBacktestRunIds.includes(prev)) return prev;
+      return filteredBacktestRunIds.length > 0 ? filteredBacktestRunIds[filteredBacktestRunIds.length - 1] : null;
+    });
+  }, [tradeRuns, filteredBacktestRunIds]);
 
   useEffect(() => {
     if (!id) return;
@@ -114,6 +172,7 @@ export default function TraderDetailPage() {
       .then(([loadedTrader, runs]) => {
         setTrader(loadedTrader);
         setBacktestStrategyFilename((prev) => prev || loadedTrader.active_strategy || '');
+        setSelectedBacktestStrategyFilename((prev) => prev ?? (loadedTrader.active_strategy || null));
         if (runs.backtest.length > 0 && runs.paper.length === 0) setMode('backtest');
       })
       .catch((e) => setError(e.message))
@@ -153,6 +212,12 @@ export default function TraderDetailPage() {
         setPortfolio(loadedPortfolio);
         setTrades(loadedTrades);
         setBacktestReport(loadedReport);
+        if (mode === 'backtest' && selectedBacktestRunId) {
+          setBacktestRunReports((prev) => ({
+            ...prev,
+            [selectedBacktestRunId]: loadedReport,
+          }));
+        }
         setPortfolioError(null);
         setReportError(null);
       })
@@ -161,6 +226,12 @@ export default function TraderDetailPage() {
           setPortfolio(null);
           setTrades([]);
           setBacktestReport(null);
+          if (mode === 'backtest' && selectedBacktestRunId) {
+            setBacktestRunReports((prev) => ({
+              ...prev,
+              [selectedBacktestRunId]: null,
+            }));
+          }
           setPortfolioError(tx('当前选择的运行暂无数据。', 'No data for current run.'));
           return;
         }
@@ -170,7 +241,7 @@ export default function TraderDetailPage() {
         setReportError(mode === 'backtest' ? e.message : null);
       })
       .finally(() => setDataLoading(false));
-  }, [id, mode, selectedBacktestRunId, selectedPaperRunId, activeRunId]);
+  }, [id, mode, selectedBacktestRunId, selectedPaperRunId, activeRunId, tx]);
 
   useEffect(() => {
     setTradesPage(1);
@@ -211,6 +282,7 @@ export default function TraderDetailPage() {
 
       await refreshRuns(id);
       setMode('backtest');
+      setSelectedBacktestStrategyFilename(strategyFilename);
       setSelectedBacktestRunId(result.run_id);
       setShowBacktestConfig(false);
     } catch (e: any) {
@@ -312,10 +384,14 @@ export default function TraderDetailPage() {
           <TraderStrategySection traderId={trader.id} onUpdate={handleStrategyUpdate} />
           <TraderDataScopeSection
             mode={mode}
-            tradeRuns={tradeRuns}
+            backtestRuns={filteredBacktestRunIds}
+            backtestRunReports={backtestRunReports}
+            backtestStrategyOptions={backtestStrategyOptions}
+            selectedBacktestStrategyFilename={selectedBacktestStrategyFilename}
             selectedBacktestRunId={selectedBacktestRunId}
             selectedPaperRunId={selectedPaperRunId}
             onModeChange={setMode}
+            onBacktestStrategyChange={setSelectedBacktestStrategyFilename}
             onBacktestRunChange={setSelectedBacktestRunId}
           />
         </aside>
