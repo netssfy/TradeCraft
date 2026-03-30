@@ -73,6 +73,11 @@ class StrategyFileModel(BaseModel):
     is_active: bool
 
 
+class StrategyCodeModel(BaseModel):
+    filename: str
+    code: str
+
+
 class BacktestRunResult(BaseModel):
     trader_id: str
     run_id: str
@@ -335,6 +340,29 @@ def set_active_strategy(trader_id: str, filename: str):
     info["active_strategy"] = filename
     store.save_info(trader_id, info)
     return _load_trader_info(trader_id)
+
+
+@router.get(
+    "/{trader_id}/strategy/{filename}/code",
+    response_model=StrategyCodeModel,
+    summary="Get strategy source code",
+)
+def get_strategy_code(trader_id: str, filename: str):
+    _assert_exists(trader_id)
+
+    normalized = os.path.basename(filename)
+    if normalized != filename:
+        raise HTTPException(status_code=400, detail="Invalid strategy filename.")
+    if not normalized.endswith(".py"):
+        raise HTTPException(status_code=400, detail="Only .py strategy files are supported.")
+
+    path = os.path.join(store.strategy_dir(trader_id), normalized)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail=f"Strategy file '{normalized}' not found.")
+
+    with open(path, "r", encoding="utf-8") as f:
+        code = f.read()
+    return StrategyCodeModel(filename=normalized, code=code)
 
 
 @router.get(

@@ -50,6 +50,11 @@ export interface StrategyFile {
   is_active: boolean;
 }
 
+export interface StrategyCode {
+  filename: string;
+  code: string;
+}
+
 export interface CreateTraderRequest {
   id: string;
   market: string;

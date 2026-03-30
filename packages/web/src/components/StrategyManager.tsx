@@ -1,5 +1,6 @@
 ﻿import { useEffect, useRef, useState } from 'react';
 import type { StrategyFile } from '@tradecraft/shared/types';
+import { Link } from 'react-router-dom';
 import { useI18n } from '../hooks/useI18n';
 import { api, researchStrategySSE } from '../services/api';
 import LoadingSpinner from './LoadingSpinner';
@@ -184,7 +185,16 @@ export default function StrategyManager({ traderId, onUpdate }: StrategyManagerP
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span className="mono" style={{ fontSize: 13 }}>{s.filename}</span>
+                <Link
+                  className="mono"
+                  to={`/traders/${traderId}/strategy/${encodeURIComponent(s.filename)}`}
+                  onClick={(e) => e.stopPropagation()}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ fontSize: 13, color: 'var(--text-primary)', textDecoration: 'underline' }}
+                >
+                  {s.filename}
+                </Link>
                 {s.is_active && <span className="badge badge-green">{tx('激活中', 'Active')}</span>}
                 {selectedStrategy === s.filename && <span className="badge">{tx('已选择', 'Selected')}</span>}
               </div>

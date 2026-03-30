@@ -2,6 +2,7 @@ import type {
   Trader,
   Portfolio,
   StrategyFile,
+  StrategyCode,
   Trade,
   TradeRuns,
   BacktestReport,
@@ -45,6 +46,9 @@ export const api = {
 
   listStrategies: (id: string) =>
     request<StrategyFile[]>(`/traders/${id}/strategy`),
+
+  getStrategyCode: (id: string, filename: string) =>
+    request<StrategyCode>(`/traders/${id}/strategy/${encodeURIComponent(filename)}/code`),
 
   uploadStrategy: async (id: string, file: File) => {
     const form = new FormData();
