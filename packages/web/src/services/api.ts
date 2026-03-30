@@ -6,6 +6,8 @@ import type {
   Trade,
   TradeRuns,
   BacktestReport,
+  MarketDataAvailability,
+  MarketDataFileDetail,
   CreateTraderRequest,
   UpdateTraderRequest,
 } from '@tradecraft/shared/types';
@@ -89,6 +91,21 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(range ?? {}),
     }),
+
+  listMarketDataAvailability: () =>
+    request<MarketDataAvailability>('/market/availability'),
+
+  getMarketDataFile: (
+    market: string,
+    symbol: string,
+    interval: string,
+    period: string,
+    page = 1,
+    pageSize = 50
+  ) =>
+    request<MarketDataFileDetail>(
+      `/market/file/${encodeURIComponent(market)}/${encodeURIComponent(symbol)}/${encodeURIComponent(interval)}/${encodeURIComponent(period)}?page=${encodeURIComponent(String(page))}&page_size=${encodeURIComponent(String(pageSize))}`
+    ),
 };
 
 export interface SSECallbacks {

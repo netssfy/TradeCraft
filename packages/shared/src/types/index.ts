@@ -94,3 +94,34 @@ export interface BacktestReport {
   strategy_filename?: string | null;
   metrics: BacktestMetrics;
 }
+
+export interface MarketDataItem {
+  market: string;
+  symbol: string;
+  interval: string;
+  file_count: number;
+  start_period: string | null;
+  end_period: string | null;
+  periods: string[];
+}
+
+export interface MarketDataAvailability {
+  root: string;
+  total_files: number;
+  items: MarketDataItem[];
+}
+
+export type MarketDataFileValue = string | number | boolean | null;
+
+export interface MarketDataFileDetail {
+  market: string;
+  symbol: string;
+  interval: string;
+  period: string;
+  path: string;
+  columns: string[];
+  total_rows: number;
+  page: number;
+  page_size: number;
+  rows: Record<string, MarketDataFileValue>[];
+}

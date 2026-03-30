@@ -1,4 +1,4 @@
-﻿import { Link } from 'react-router-dom';
+﻿import { Link, useLocation } from 'react-router-dom';
 import { useI18n } from '../hooks/useI18n';
 import { useTheme } from '../hooks/useTheme';
 
@@ -7,6 +7,7 @@ interface LayoutProps {
 }
 
 export default function Layout({ children }: LayoutProps) {
+  const location = useLocation();
   const { theme, toggle } = useTheme();
   const { lang, setLang, tx } = useI18n();
 
@@ -15,10 +16,23 @@ export default function Layout({ children }: LayoutProps) {
       <header className="app-header">
         <div className="container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
-            <Link to="/" className="brand-mark" style={{ fontSize: 20, fontWeight: 800, color: 'var(--text-primary)' }}>
-              TradeCraft
-            </Link>
-            <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>{tx('智能交易工作台', 'Intelligent Trading Workspace')}</span>
+            <div>
+              <Link to="/" className="brand-mark" style={{ fontSize: 20, fontWeight: 800, color: 'var(--text-primary)' }}>
+                TradeCraft
+              </Link>
+              <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>{tx('智能交易工作台', 'Intelligent Trading Workspace')}</div>
+            </div>
+            <nav className="header-nav" aria-label={tx('主导航', 'Main navigation')}>
+              <Link to="/" className={`header-nav__link ${location.pathname === '/' ? 'header-nav__link--active' : ''}`}>
+                {tx('交易员', 'Traders')}
+              </Link>
+              <Link
+                to="/market-data"
+                className={`header-nav__link ${location.pathname.startsWith('/market-data') ? 'header-nav__link--active' : ''}`}
+              >
+                {tx('市场数据', 'Market Data')}
+              </Link>
+            </nav>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
