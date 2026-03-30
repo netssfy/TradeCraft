@@ -255,17 +255,15 @@ def _research_prompt(
     target: Optional[str],
 ) -> str:
     repo_root = Path(__file__).resolve().parents[3]
-    backend_root = Path(__file__).resolve().parents[2]
     strategy_contract = (repo_root / "backend" / "app" / "trading" / "strategy.py").as_posix()
     trader_id = info["id"]
-    trader_skill_path = Path(store.trader_dir(trader_id)) / "SKILL.md"
+    trader_skill_path = (Path(store.trader_dir(trader_id)) / "SKILL.md").resolve()
     if not trader_skill_path.is_file():
         raise ValueError(f"Trader skill not found: {trader_skill_path.as_posix()}")
 
     traits = info.get("traits", {})
     traits_str = ", ".join(f"{k}={v}" for k, v in traits.items())
-    sdir = Path(store.strategy_dir(trader_id))
-    strategy_dir_abs = (backend_root / sdir).resolve()
+    strategy_dir_abs = Path(store.strategy_dir(trader_id)).resolve()
     existing: List[str] = []
     if strategy_dir_abs.is_dir():
         existing = sorted(f for f in os.listdir(strategy_dir_abs) if f.endswith(".py"))

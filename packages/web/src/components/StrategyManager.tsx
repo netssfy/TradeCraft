@@ -129,6 +129,7 @@ export default function StrategyManager({ traderId, onUpdate }: StrategyManagerP
             load();
             onUpdate();
             setResearching(false);
+            window.location.reload();
           },
           onError: (msg) => {
             appendMessage('error', msg);
