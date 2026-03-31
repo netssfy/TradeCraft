@@ -1,5 +1,33 @@
 ﻿# TradeCraft
 
+AI编写，AI驱动，AI自己研究策略
+
+## 界面预览
+
+> 本节截图来自本地开发环境 `http://localhost:5173`（2026-03-31）。
+
+### 功能截图（桌面端）
+
+#### 交易员列表
+![Trader List](docs/images/ui-trader-list.png)
+
+#### 创建交易员
+![Create Trader](docs/images/ui-trader-create.png)
+
+#### 交易员详情
+![Trader Detail](docs/images/ui-trader-detail.png)
+
+#### 策略源码页
+![Strategy Code](docs/images/ui-strategy-code.png)
+
+#### 市场数据页
+![Market Data](docs/images/ui-market-data.png)
+
+### 演示动图
+
+![TradeCraft Overview GIF](docs/images/ui-overview.gif)
+
+
 ## 目录结构
 
 ```text
