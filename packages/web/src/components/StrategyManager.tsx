@@ -9,6 +9,8 @@ import StreamMessagePanel, { type StreamMessage, type StreamMessageType } from '
 interface StrategyManagerProps {
   traderId: string;
   onUpdate: () => void;
+  onRunBacktest?: () => void;
+  runningBacktest?: boolean;
 }
 
 function inferMessageType(message: string): StreamMessageType {
@@ -25,7 +27,12 @@ function inferMessageType(message: string): StreamMessageType {
   return 'info';
 }
 
-export default function StrategyManager({ traderId, onUpdate }: StrategyManagerProps) {
+export default function StrategyManager({
+  traderId,
+  onUpdate,
+  onRunBacktest,
+  runningBacktest = false,
+}: StrategyManagerProps) {
   const { tx } = useI18n();
   const nextMessageIdRef = useRef(1);
 
@@ -108,8 +115,9 @@ export default function StrategyManager({ traderId, onUpdate }: StrategyManagerP
     }
   };
 
-  const handleResearch = async (mode: 'create' | 'update') => {
-    if (mode === 'update' && !selectedStrategy) {
+  const handleResearch = async (mode: 'create' | 'update', targetStrategy?: string) => {
+    const target = mode === 'update' ? (targetStrategy ?? selectedStrategy ?? undefined) : undefined;
+    if (mode === 'update' && !target) {
       setError(tx('请先选择策略。', 'Please select a strategy first.'));
       return;
     }
@@ -139,7 +147,7 @@ export default function StrategyManager({ traderId, onUpdate }: StrategyManagerP
         },
         {
           mode,
-          target: mode === 'update' ? selectedStrategy ?? undefined : undefined,
+          target,
         }
       );
     } catch (e: any) {
@@ -159,9 +167,15 @@ export default function StrategyManager({ traderId, onUpdate }: StrategyManagerP
           <button className="btn btn-primary" onClick={() => handleResearch('create')} disabled={researching}>
             {researching ? tx('研究中...', 'Researching...') : tx('新建策略', 'Create New Strategy')}
           </button>
-          <button className="btn" onClick={() => handleResearch('update')} disabled={researching || !selectedStrategy}>
-            {researching ? tx('研究中...', 'Researching...') : tx('更新已选策略', 'Update Selected Strategy')}
-          </button>
+          {onRunBacktest && (
+            <button
+              className="btn btn-primary"
+              onClick={onRunBacktest}
+              disabled={researching || runningBacktest || strategies.length === 0}
+            >
+              {runningBacktest ? tx('回测中...', 'Running...') : tx('启动回测', 'Run Backtest')}
+            </button>
+          )}
         </div>
       </div>
 
@@ -182,7 +196,14 @@ export default function StrategyManager({ traderId, onUpdate }: StrategyManagerP
                 padding: '8px 0',
                 borderBottom: '1px solid var(--border-color)',
                 cursor: 'pointer',
-                background: selectedStrategy === s.filename ? 'rgba(30, 64, 175, 0.08)' : 'transparent',
+                background:
+                  selectedStrategy === s.filename
+                    ? 'linear-gradient(90deg, rgba(59,130,246,0.28), rgba(59,130,246,0.12))'
+                    : 'transparent',
+                borderRadius: selectedStrategy === s.filename ? 8 : 0,
+                boxShadow: selectedStrategy === s.filename ? 'inset 3px 0 0 rgba(96,165,250,0.95)' : 'none',
+                paddingLeft: selectedStrategy === s.filename ? 8 : 0,
+                paddingRight: selectedStrategy === s.filename ? 8 : 0,
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -197,13 +218,22 @@ export default function StrategyManager({ traderId, onUpdate }: StrategyManagerP
                   {s.filename}
                 </Link>
                 {s.is_active && <span className="badge badge-green">{tx('激活中', 'Active')}</span>}
-                {selectedStrategy === s.filename && <span className="badge">{tx('已选择', 'Selected')}</span>}
               </div>
-              {!s.is_active && (
-                <button className="btn" onClick={() => handleSetActive(s.filename)} style={{ padding: '4px 8px', fontSize: 12 }}>
-                  {tx('设为激活', 'Set Active')}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button
+                  className="btn"
+                  onClick={() => handleResearch('update', s.filename)}
+                  style={{ padding: '4px 8px', fontSize: 12 }}
+                  disabled={researching}
+                >
+                  {researching ? tx('研究中...', 'Researching...') : tx('更新策略', 'Update Strategy')}
                 </button>
-              )}
+                {!s.is_active && (
+                  <button className="btn" onClick={() => handleSetActive(s.filename)} style={{ padding: '4px 8px', fontSize: 12 }}>
+                    {tx('设为激活', 'Set Active')}
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </div>

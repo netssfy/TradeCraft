@@ -56,7 +56,7 @@ export default function TraderDetailPage() {
   const [showBacktestConfig, setShowBacktestConfig] = useState(false);
   const [backtestStartDate, setBacktestStartDate] = useState('');
   const [backtestEndDate, setBacktestEndDate] = useState('');
-  const [backtestStrategyFilename, setBacktestStrategyFilename] = useState('');
+  const [backtestStrategyFilenames, setBacktestStrategyFilenames] = useState<string[]>([]);
 
   const formatDateInput = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -74,9 +74,19 @@ export default function TraderDetailPage() {
     const range = getDefaultBacktestRange();
     setBacktestStartDate(range.start);
     setBacktestEndDate(range.end);
-    const active = strategyFiles.find((s) => s.is_active)?.filename ?? '';
-    setBacktestStrategyFilename((prev) => prev || active);
+    const active = strategyFiles.find((s) => s.is_active)?.filename;
+    setBacktestStrategyFilenames((prev) => {
+      const validPrevious = prev.filter((filename) => strategyFiles.some((s) => s.filename === filename));
+      if (validPrevious.length > 0) return validPrevious;
+      return active ? [active] : [];
+    });
     setShowBacktestConfig(true);
+  };
+
+  const toggleBacktestStrategy = (filename: string) => {
+    setBacktestStrategyFilenames((prev) => (
+      prev.includes(filename) ? prev.filter((name) => name !== filename) : [...prev, filename]
+    ));
   };
 
   const activeRunId = mode === 'backtest' ? selectedBacktestRunId : selectedPaperRunId;
@@ -125,11 +135,6 @@ export default function TraderDetailPage() {
     setStrategyFiles(files);
 
     const active = files.find((s) => s.is_active)?.filename ?? '';
-    setBacktestStrategyFilename((prev) => {
-      if (prev && files.some((f) => f.filename === prev)) return prev;
-      return active;
-    });
-
     setSelectedBacktestStrategyFilename((prev) => {
       if (prev === null) return null;
       if (prev && files.some((f) => f.filename === prev)) return prev;
@@ -172,7 +177,6 @@ export default function TraderDetailPage() {
     Promise.all([api.getTrader(id), refreshRuns(id), refreshStrategyFiles(id)])
       .then(([loadedTrader, runs]) => {
         setTrader(loadedTrader);
-        setBacktestStrategyFilename((prev) => prev || loadedTrader.active_strategy || '');
         setSelectedBacktestStrategyFilename((prev) => prev ?? (loadedTrader.active_strategy || null));
         if (runs.backtest.length > 0 && runs.paper.length === 0) setMode('backtest');
       })
@@ -181,11 +185,15 @@ export default function TraderDetailPage() {
   }, [id]);
 
   useEffect(() => {
+    setBacktestStrategyFilenames((prev) => prev.filter((filename) => strategyFiles.some((s) => s.filename === filename)));
+  }, [strategyFiles]);
+
+  useEffect(() => {
     if (!id) return;
 
     if (mode === 'backtest' && !selectedBacktestRunId) {
       setPortfolio(null);
-      setPortfolioError(tx('未选择回测运行。', 'No backtest run selected.'));
+      setPortfolioError(tx('No backtest run selected.', 'No backtest run selected.'));
       setTrades([]);
       setBacktestReport(null);
       setReportError(null);
@@ -197,9 +205,7 @@ export default function TraderDetailPage() {
     setReportError(null);
 
     const portfolioPromise = api.getPortfolio(id, mode, mode === 'backtest' ? selectedBacktestRunId ?? undefined : undefined);
-
     const tradesPromise = activeRunId ? api.getTrades(id, mode, activeRunId) : Promise.resolve([] as Trade[]);
-
     const reportPromise =
       mode === 'backtest' && selectedBacktestRunId
         ? api.getBacktestReport(id, selectedBacktestRunId).catch((e: Error) => {
@@ -233,7 +239,7 @@ export default function TraderDetailPage() {
               [selectedBacktestRunId]: null,
             }));
           }
-          setPortfolioError(tx('当前选择的运行暂无数据。', 'No data for current run.'));
+          setPortfolioError(tx('No data for current run.', 'No data for current run.'));
           return;
         }
         setPortfolioError(e.message);
@@ -249,25 +255,25 @@ export default function TraderDetailPage() {
   }, [mode, activeRunId, trades]);
 
   const handleDelete = async () => {
-    if (!id || !window.confirm(tx('确定要永久删除该交易员吗？', 'Delete this trader permanently?'))) return;
+    if (!id || !window.confirm(tx('Delete this trader permanently?', 'Delete this trader permanently?'))) return;
     setDeleting(true);
     try {
       await api.deleteTrader(id);
       navigate('/');
     } catch (e: any) {
-      setError(`${tx('删除失败', 'Delete failed')}: ${e.message}`);
+      setError(`${tx('Delete failed', 'Delete failed')}: ${e.message}`);
       setDeleting(false);
     }
   };
 
-  const handleRunBacktest = async (startDate: string, endDate: string, strategyFilename: string) => {
+  const handleRunBacktest = async (startDate: string, endDate: string, strategyFilenames: string[]) => {
     if (!id) return;
     if (startDate > endDate) {
-      setError(tx('回测开始日期不能晚于结束日期。', 'Backtest start date must not be later than end date.'));
+      setError(tx('Backtest start date must not be later than end date.', 'Backtest start date must not be later than end date.'));
       return;
     }
-    if (!strategyFilename) {
-      setError(tx('请选择一个策略用于回测。', 'Please select one strategy for backtest.'));
+    if (strategyFilenames.length === 0) {
+      setError(tx('Please select at least one strategy for backtest.', 'Please select at least one strategy for backtest.'));
       return;
     }
 
@@ -275,19 +281,27 @@ export default function TraderDetailPage() {
     setError(null);
 
     try {
-      const result = await api.runBacktest(id, {
-        start_date: startDate,
-        end_date: endDate,
-        strategy_filename: strategyFilename,
-      });
+      let lastRunId: string | null = null;
+
+      for (const strategyFilename of strategyFilenames) {
+        const result = await api.runBacktest(id, {
+          start_date: startDate,
+          end_date: endDate,
+          strategy_filename: strategyFilename,
+        });
+        lastRunId = result.run_id;
+      }
 
       await refreshRuns(id);
       setMode('backtest');
-      setSelectedBacktestStrategyFilename(strategyFilename);
-      setSelectedBacktestRunId(result.run_id);
+      setSelectedBacktestStrategyFilename((prev) => {
+        if (prev && strategyFilenames.includes(prev)) return prev;
+        return strategyFilenames[0] ?? null;
+      });
+      if (lastRunId) setSelectedBacktestRunId(lastRunId);
       setShowBacktestConfig(false);
     } catch (e: any) {
-      setError(`${tx('启动回测失败', 'Failed to start backtest')}: ${e.message}`);
+      setError(`${tx('Failed to start backtest', 'Failed to start backtest')}: ${e.message}`);
     } finally {
       setRunningBacktest(false);
     }
@@ -295,7 +309,7 @@ export default function TraderDetailPage() {
 
   const handleDeleteBacktestRun = async (runId: string) => {
     if (!id) return;
-    if (!window.confirm(tx('确定要删除该回测运行吗？', 'Delete this backtest run?'))) return;
+    if (!window.confirm(tx('Delete this backtest run?', 'Delete this backtest run?'))) return;
 
     setDeletingBacktestRunId(runId);
     setError(null);
@@ -306,7 +320,7 @@ export default function TraderDetailPage() {
         setBacktestReport(null);
       }
     } catch (e: any) {
-      setError(`${tx('删除回测失败', 'Failed to delete backtest run')}: ${e.message}`);
+      setError(`${tx('Failed to delete backtest run', 'Failed to delete backtest run')}: ${e.message}`);
     } finally {
       setDeletingBacktestRunId(null);
     }
@@ -337,7 +351,7 @@ export default function TraderDetailPage() {
       <div>
         <ErrorMessage message={error} />
         <Link to="/" className="btn" style={{ marginTop: 16 }}>
-          {tx('返回列表', 'Back to list')}
+          {tx('Back to list', 'Back to list')}
         </Link>
       </div>
     );
@@ -349,45 +363,42 @@ export default function TraderDetailPage() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
         <div>
-          <Link to="/" style={{ color: 'var(--text-muted)', fontSize: 13 }}>{tx('返回列表', 'Back to list')}</Link>
+          <Link to="/" style={{ color: 'var(--text-muted)', fontSize: 13 }}>{tx('Back to list', 'Back to list')}</Link>
           <h1 style={{ fontSize: 24, fontWeight: 600, marginTop: 8 }}>{trader.id}</h1>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-primary" onClick={openBacktestConfig} disabled={runningBacktest}>
-            {runningBacktest ? tx('回测中...', 'Running...') : tx('启动回测', 'Run Backtest')}
-          </button>
-          <button className="btn" onClick={() => setShowEdit(true)}>{tx('编辑', 'Edit')}</button>
+          <button className="btn" onClick={() => setShowEdit(true)}>{tx('Edit', 'Edit')}</button>
           <button className="btn btn-danger" onClick={handleDelete} disabled={deleting}>
-            {deleting ? tx('删除中...', 'Deleting...') : tx('删除', 'Delete')}
+            {deleting ? tx('Deleting...', 'Deleting...') : tx('Delete', 'Delete')}
           </button>
         </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16, marginBottom: 24 }}>
         <div className="card">
-          <div className="label">{tx('基础信息', 'Basics')}</div>
+          <div className="label">{tx('Basics', 'Basics')}</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 8 }}>
             <div>
-              <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{tx('市场', 'Market')}</span>
+              <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{tx('Market', 'Market')}</span>
               <div><span className="badge badge-yellow">{trader.market}</span></div>
             </div>
             <div>
-              <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{tx('初始资金', 'Initial Cash')}</span>
+              <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{tx('Initial Cash', 'Initial Cash')}</span>
               <div className="mono">{formatCurrency(trader.initial_cash)}</div>
             </div>
             <div>
-              <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{tx('手续费率', 'Commission Rate')}</span>
+              <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{tx('Commission Rate', 'Commission Rate')}</span>
               <div className="mono">{(trader.commission_rate * 100).toFixed(2)}%</div>
             </div>
             <div>
-              <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{tx('订单超时', 'Order Timeout')}</span>
+              <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{tx('Order Timeout', 'Order Timeout')}</span>
               <div className="mono">{trader.order_timeout_seconds}s</div>
             </div>
           </div>
         </div>
 
         <div className="card">
-          <div className="label">{tx('六维特质', 'Traits')}</div>
+          <div className="label">{tx('Traits', 'Traits')}</div>
           <div style={{ marginTop: 8 }}>
             {Object.entries(trader.traits).map(([key, value]) => (
               <div key={key} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border-color)' }}>
@@ -401,7 +412,12 @@ export default function TraderDetailPage() {
 
       <div className="trader-detail-layout">
         <aside className="trader-detail-sidebar">
-          <TraderStrategySection traderId={trader.id} onUpdate={handleStrategyUpdate} />
+          <TraderStrategySection
+            traderId={trader.id}
+            onUpdate={handleStrategyUpdate}
+            onRunBacktest={openBacktestConfig}
+            runningBacktest={runningBacktest}
+          />
           <TraderDataScopeSection
             mode={mode}
             backtestRuns={filteredBacktestRunIds}
@@ -430,7 +446,7 @@ export default function TraderDetailPage() {
 
           {mode === 'backtest' && (
             <div className="card">
-              <div className="label" style={{ marginBottom: 12 }}>{tx('回测报告', 'Backtest Report')}</div>
+              <div className="label" style={{ marginBottom: 12 }}>{tx('Backtest Report', 'Backtest Report')}</div>
               {dataLoading ? (
                 <LoadingSpinner />
               ) : reportError ? (
@@ -438,36 +454,36 @@ export default function TraderDetailPage() {
               ) : backtestReport ? (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
                   <div>
-                    <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>{tx('回测区间', 'Backtest Range')}</div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>{tx('Backtest Range', 'Backtest Range')}</div>
                     <div className="mono">{shortDate(backtestReport.backtest_start)} ~ {shortDate(backtestReport.backtest_end)}</div>
                   </div>
                   <div>
-                    <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>{tx('最终净值', 'Final NAV')}</div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>{tx('Final NAV', 'Final NAV')}</div>
                     <div className="mono">{formatCurrency(backtestReport.final_nav)}</div>
                   </div>
                   <div>
-                    <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>{tx('年化收益率', 'Annualized Return')}</div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>{tx('Annualized Return', 'Annualized Return')}</div>
                     <div className="mono">{formatPercent(backtestReport.metrics.annualized_return)}</div>
                   </div>
                   <div>
-                    <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>{tx('最大回撤', 'Max Drawdown')}</div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>{tx('Max Drawdown', 'Max Drawdown')}</div>
                     <div className="mono">{formatPercent(backtestReport.metrics.max_drawdown)}</div>
                   </div>
                   <div>
-                    <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>{tx('夏普比率', 'Sharpe Ratio')}</div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>{tx('Sharpe Ratio', 'Sharpe Ratio')}</div>
                     <div className="mono">{backtestReport.metrics.sharpe_ratio.toFixed(3)}</div>
                   </div>
                   <div>
-                    <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>{tx('胜率', 'Win Rate')}</div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>{tx('Win Rate', 'Win Rate')}</div>
                     <div className="mono">{formatPercent(backtestReport.metrics.win_rate)}</div>
                   </div>
                   <div>
-                    <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>{tx('盈亏比', 'Profit/Loss Ratio')}</div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>{tx('Profit/Loss Ratio', 'Profit/Loss Ratio')}</div>
                     <div className="mono">{backtestReport.metrics.profit_loss_ratio.toFixed(3)}</div>
                   </div>
                 </div>
               ) : (
-                <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 20 }}>{tx('当前回测暂无报告。', 'No report for current backtest.')}</div>
+                <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 20 }}>{tx('No report for current backtest.', 'No report for current backtest.')}</div>
               )}
             </div>
           )}
@@ -499,40 +515,59 @@ export default function TraderDetailPage() {
           }}
         >
           <div className="card" style={{ width: '100%', maxWidth: 420 }}>
-            <div className="label" style={{ marginBottom: 12 }}>{tx('启动回测', 'Run Backtest')}</div>
+            <div className="label" style={{ marginBottom: 12 }}>{tx('Run Backtest', 'Run Backtest')}</div>
             <div style={{ display: 'grid', gap: 12 }}>
               <label style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-                {tx('开始日期', 'Start Date')}
+                {tx('Start Date', 'Start Date')}
                 <input type="date" value={backtestStartDate} onChange={(e) => setBacktestStartDate(e.target.value)} style={{ width: '100%', marginTop: 6 }} />
               </label>
               <label style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-                {tx('结束日期', 'End Date')}
+                {tx('End Date', 'End Date')}
                 <input type="date" value={backtestEndDate} onChange={(e) => setBacktestEndDate(e.target.value)} style={{ width: '100%', marginTop: 6 }} />
               </label>
-              <label style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-                {tx('回测策略', 'Backtest Strategy')}
-                <select value={backtestStrategyFilename} onChange={(e) => setBacktestStrategyFilename(e.target.value)} style={{ width: '100%', marginTop: 6 }}>
+              <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                <div style={{ marginBottom: 6 }}>{tx('Backtest Strategies', 'Backtest Strategies')}</div>
+                <div style={{ border: '1px solid var(--border-color)', borderRadius: 10, overflow: 'hidden' }}>
                   {strategyFiles.length === 0 ? (
-                    <option value="">{tx('暂无可用策略', 'No available strategy')}</option>
+                    <div style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>{tx('No available strategy', 'No available strategy')}</div>
                   ) : (
-                    strategyFiles.map((s) => (
-                      <option key={s.filename} value={s.filename}>
-                        {s.filename}
-                        {s.is_active ? ` (${tx('激活中', 'Active')})` : ''}
-                      </option>
-                    ))
+                    strategyFiles.map((s) => {
+                      const selected = backtestStrategyFilenames.includes(s.filename);
+                      return (
+                        <label
+                          key={s.filename}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
+                            padding: '10px 12px',
+                            borderTop: '1px solid var(--border-color)',
+                            background: selected ? 'rgba(59, 130, 246, 0.18)' : 'transparent',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            onChange={() => toggleBacktestStrategy(s.filename)}
+                          />
+                          <span className="mono" style={{ flex: 1 }}>{s.filename}</span>
+                          {s.is_active && <span className="badge badge-green">{tx('Active', 'Active')}</span>}
+                        </label>
+                      );
+                    })
                   )}
-                </select>
-              </label>
+                </div>
+              </div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
-              <button className="btn" onClick={() => setShowBacktestConfig(false)} disabled={runningBacktest}>{tx('取消', 'Cancel')}</button>
+              <button className="btn" onClick={() => setShowBacktestConfig(false)} disabled={runningBacktest}>{tx('Cancel', 'Cancel')}</button>
               <button
                 className="btn btn-primary"
-                onClick={() => handleRunBacktest(backtestStartDate, backtestEndDate, backtestStrategyFilename)}
-                disabled={runningBacktest || strategyFiles.length === 0 || !backtestStrategyFilename}
+                onClick={() => handleRunBacktest(backtestStartDate, backtestEndDate, backtestStrategyFilenames)}
+                disabled={runningBacktest || strategyFiles.length === 0 || backtestStrategyFilenames.length === 0}
               >
-                {runningBacktest ? tx('回测中...', 'Running...') : tx('确认', 'Confirm')}
+                {runningBacktest ? tx('Running...', 'Running...') : tx('Confirm', 'Confirm')}
               </button>
             </div>
           </div>

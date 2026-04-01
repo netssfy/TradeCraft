@@ -6,6 +6,7 @@ import type {
   Trade,
   TradeRuns,
   BacktestReport,
+  BacktestRunResult,
   MarketDataAvailability,
   MarketDataFileDetail,
   CreateTraderRequest,
@@ -87,7 +88,7 @@ export const api = {
     id: string,
     range?: { start_date?: string; end_date?: string; strategy_filename?: string }
   ) =>
-    request<{ trader_id: string; run_id: string }>(`/traders/${id}/backtest/run`, {
+    request<BacktestRunResult>(`/traders/${id}/backtest/run`, {
       method: 'POST',
       body: JSON.stringify(range ?? {}),
     }),

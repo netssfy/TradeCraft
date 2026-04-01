@@ -95,6 +95,11 @@ export interface BacktestReport {
   metrics: BacktestMetrics;
 }
 
+export interface BacktestRunResult {
+  trader_id: string;
+  run_id: string;
+}
+
 export interface MarketDataItem {
   market: string;
   symbol: string;
