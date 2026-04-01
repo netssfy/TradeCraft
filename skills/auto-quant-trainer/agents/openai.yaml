@@ -1,0 +1,4 @@
+interface:
+  display_name: "Auto Quant Trainer"
+  short_description: "Autonomous strategy research with CLI backtest loop"
+  default_prompt: "Build and iterate a strategy via program.md"
