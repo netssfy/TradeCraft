@@ -11,8 +11,8 @@ import pandas as pd
 
 from app.adapters.data_feed import AkshareDataFeed, BaostockDataFeed, DataFeed, YfinanceDataFeed
 from app.adapters.simulator import Simulator
-from app.core.config import BacktestConfig, Config, load_config
-from app.data.market import BarInterval, Market
+from app.core.config import Config, load_config
+from app.data.market import Market
 from app.data.repository import MarketRepository
 from app.engine.core import Engine, EngineMode
 from app.engine.trader import Trader
@@ -45,16 +45,6 @@ def _parse_market(value: str) -> Market:
     except Exception as exc:
         valid = ", ".join(m.value for m in Market)
         raise argparse.ArgumentTypeError(f"Invalid market '{value}'. Expected one of: {valid}") from exc
-
-
-def _parse_interval(value: str) -> BarInterval:
-    normalized = value.strip().lower()
-    mapping = {item.value: item for item in BarInterval}
-    result = mapping.get(normalized)
-    if result is None:
-        valid = ", ".join(mapping.keys())
-        raise argparse.ArgumentTypeError(f"Invalid interval '{value}'. Expected one of: {valid}")
-    return result
 
 
 def _parse_date(value: str) -> date:
@@ -230,11 +220,7 @@ def cmd_backtest_run(args: argparse.Namespace) -> int:
     if start_date > end_date:
         raise ValueError("start_date must be <= end_date")
 
-    bar_interval = args.bar_interval or cfg.bar_interval
     run_cfg = Config(
-        mode="backtest",
-        bar_interval=bar_interval,
-        backtest=BacktestConfig(start_date=start_date.isoformat(), end_date=end_date.isoformat()),
         data_sources=cfg.data_sources,
         logging=cfg.logging,
     )
@@ -264,6 +250,8 @@ def cmd_backtest_run(args: argparse.Namespace) -> int:
         data_feeds=[feed],
         config=run_cfg,
         store=store,
+        backtest_start=start_date.isoformat(),
+        backtest_end=end_date.isoformat(),
     )
     engine.start()
     trader.save_trades(store, engine._run_id, mode="backtest")
@@ -275,7 +263,7 @@ def cmd_backtest_run(args: argparse.Namespace) -> int:
             "run_id": engine._run_id,
             "start_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),
-            "bar_interval": bar_interval,
+            "bar_interval": "1m",
             "strategy_filename": trader.strategy_filename,
             "report": report,
         }
@@ -335,7 +323,6 @@ def _build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--trader-id", required=True)
     run_parser.add_argument("--start-date", help="YYYY-MM-DD")
     run_parser.add_argument("--end-date", help="YYYY-MM-DD")
-    run_parser.add_argument("--bar-interval", help="1m/5m/15m/30m/60m/1d")
     run_parser.add_argument("--strategy-filename", help="Optional strategy file to run")
     run_parser.add_argument("--config-path", default="config.yaml")
     run_parser.add_argument("--traders-dir", default="data/traders")

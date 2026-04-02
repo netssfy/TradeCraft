@@ -15,7 +15,7 @@ from typing import Dict, List, Optional
 
 from app.adapters.data_feed import DataFeed, DataFeedError
 from app.adapters.simulator import Simulator
-from app.core.config import Config, load_config
+from app.core.config import Config
 from app.data.market import BarInterval, Market
 from app.data.repository import MarketRepository
 from app.engine.context import Context
@@ -43,6 +43,8 @@ class Engine:
         data_feeds: List[DataFeed],
         config: Config,
         store: Optional[TraderStore] = None,
+        backtest_start: Optional[str] = None,
+        backtest_end: Optional[str] = None,
     ) -> None:
         self.mode = mode
         self.traders = traders
@@ -51,6 +53,8 @@ class Engine:
         self.data_feeds = data_feeds
         self.config = config
         self.store = store or TraderStore()
+        self._backtest_start = backtest_start  # YYYY-MM-DD, required for BACKTEST mode
+        self._backtest_end = backtest_end      # YYYY-MM-DD, required for BACKTEST mode
 
         self._stop_flag: bool = False
         self._saved_close_dates: set = set()  # 防止同一天重复保存 portfolio 快照
@@ -93,7 +97,7 @@ class Engine:
         # Determine the target end time
         if self.mode == EngineMode.BACKTEST:
             end_time = datetime.strptime(
-                self.config.backtest.end_date, "%Y-%m-%d"
+                self._backtest_end, "%Y-%m-%d"
             ).replace(tzinfo=timezone.utc)
         else:
             end_time = datetime.now(tz=timezone.utc)
@@ -193,7 +197,7 @@ class Engine:
 
     def _tick(self, bar_time: datetime) -> None:
         """单个 Bar 的完整处理：按 Market 分发 Bar → 驱动 Trader → PAPER 模式落盘。"""
-        bar_interval = _parse_bar_interval(self.config.bar_interval)
+        bar_interval = _parse_bar_interval("1m")
 
         for trader in self.traders:
             market = trader.market
@@ -291,13 +295,13 @@ class Engine:
     def _run_backtest(self) -> None:
         """BACKTEST 模式：从 Repository 按时间顺序逐 Bar 读取推进。"""
         start_dt = datetime.strptime(
-            self.config.backtest.start_date, "%Y-%m-%d"
+            self._backtest_start, "%Y-%m-%d"
         ).replace(tzinfo=timezone.utc)
         end_dt = datetime.strptime(
-            self.config.backtest.end_date, "%Y-%m-%d"
+            self._backtest_end, "%Y-%m-%d"
         ).replace(tzinfo=timezone.utc)
 
-        bar_interval = _parse_bar_interval(self.config.bar_interval)
+        bar_interval = _parse_bar_interval("1m")
 
         # Collect all (market, symbol) pairs
         all_pairs: List[tuple] = []
@@ -469,10 +473,10 @@ class Engine:
         from app.backtest.report import Report
 
         backtest_start = datetime.strptime(
-            self.config.backtest.start_date, "%Y-%m-%d"
+            self._backtest_start, "%Y-%m-%d"
         ).replace(tzinfo=timezone.utc)
         backtest_end = datetime.strptime(
-            self.config.backtest.end_date, "%Y-%m-%d"
+            self._backtest_end, "%Y-%m-%d"
         ).replace(tzinfo=timezone.utc)
 
         reports = []
@@ -492,7 +496,7 @@ class Engine:
             for symbol, pos in portfolio.positions.items():
                 if pos.quantity <= 0:
                     continue
-                bar_interval = _parse_bar_interval(self.config.bar_interval)
+                bar_interval = _parse_bar_interval("1m")
                 bars = self.repository.read(
                     symbol, trader.market, bar_interval,
                     backtest_start, backtest_end,
@@ -536,80 +540,8 @@ class Engine:
         return reports
 
     # ------------------------------------------------------------------
-    # Factory — from_traders_dir()
+    # Helpers (end of Engine class)
     # ------------------------------------------------------------------
-
-    @classmethod
-    def from_traders_dir(
-        cls,
-        config_path: Optional[str] = None,
-        traders_dir: str = "data/traders",
-    ) -> "Engine":
-        """从 data/traders/ 目录加载所有 Trader，结合全局配置构建 Engine。
-
-        config.yaml 只需保留全局字段：mode、bar_interval、backtest、data_sources、logging。
-        Trader 相关配置全部来自各自的 trader.json。
-        """
-        from app.adapters.data_feed import AkshareDataFeed, BaostockDataFeed, YfinanceDataFeed
-        from app.engine.trader import Trader
-        from app.engine.trader_store import TraderStore
-
-        config = load_config(config_path)
-        mode = EngineMode(config.mode)
-
-        _FEED_CLASSES = {
-            "akshare": AkshareDataFeed,
-            "baostock": BaostockDataFeed,
-            "yfinance": YfinanceDataFeed,
-        }
-
-        feed_instances: Dict[str, DataFeed] = {}
-        for market_str, feed_name in config.data_sources.items():
-            feed_key = feed_name.lower()
-            if feed_key not in feed_instances:
-                feed_cls = _FEED_CLASSES.get(feed_key)
-                if feed_cls is None:
-                    raise ValueError(f"Unknown data source '{feed_name}' for market '{market_str}'.")
-                feed_instances[feed_key] = feed_cls()
-
-        data_feeds = list(feed_instances.values())
-
-        repository = MarketRepository()
-        # commission_rate per-trader; use a default simulator (each trader carries its own rate)
-        simulator = Simulator(commission_rate=0.0003)
-
-        store = TraderStore(base_dir=traders_dir)
-        trader_names = store.list_traders()
-        if not trader_names:
-            raise ValueError(f"No traders found in '{traders_dir}'. Create a trader first.")
-
-        traders: List[Trader] = []
-        for name in trader_names:
-            try:
-                trader = Trader.from_dir(
-                    name,
-                    store,
-                    repository,
-                    simulator,
-                    require_active_strategy=(mode == EngineMode.PAPER),
-                )
-                traders.append(trader)
-                logger.info("Loaded trader '%s' from %s", name, store.trader_dir(name))
-            except Exception as exc:
-                logger.error("Failed to load trader '%s': %s", name, exc, exc_info=True)
-
-        if not traders:
-            raise ValueError("No traders could be loaded successfully.")
-
-        return cls(
-            mode=mode,
-            traders=traders,
-            repository=repository,
-            simulator=simulator,
-            data_feeds=data_feeds,
-            config=config,
-            store=store,
-        )
 
 
 # ------------------------------------------------------------------

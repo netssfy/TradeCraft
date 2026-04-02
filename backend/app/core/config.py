@@ -23,12 +23,6 @@ class ConfigError(Exception):
 # ---------------------------------------------------------------------------
 
 @dataclass
-class BacktestConfig:
-    start_date: str = "2023-01-01"
-    end_date: str = "2023-12-31"
-
-
-@dataclass
 class LoggingConfig:
     level: str = "INFO"
     file: str = "data/logs/tradecraft.log"
@@ -57,9 +51,6 @@ class TraderConfig:
 
 @dataclass
 class Config:
-    mode: str = "backtest"
-    bar_interval: str = "1m"
-    backtest: BacktestConfig = field(default_factory=BacktestConfig)
     data_sources: Dict[str, str] = field(
         default_factory=lambda: {"CN": "akshare", "HK": "yfinance", "US": "yfinance"}
     )
@@ -72,7 +63,7 @@ class Config:
 # 必填字段定义
 # ---------------------------------------------------------------------------
 
-_REQUIRED_FIELDS = ["mode", "bar_interval"]
+_REQUIRED_FIELDS: list = []
 
 
 # ---------------------------------------------------------------------------
@@ -175,12 +166,6 @@ def _coerce(value: str) -> Any:
 
 def _dict_to_config(data: Dict) -> Config:
     """将原始字典转换为 Config 数据类实例。"""
-    backtest_raw = data.get("backtest", {})
-    backtest = BacktestConfig(
-        start_date=backtest_raw.get("start_date", "2023-01-01"),
-        end_date=backtest_raw.get("end_date", "2023-12-31"),
-    )
-
     logging_raw = data.get("logging", {})
     logging_cfg = LoggingConfig(
         level=logging_raw.get("level", "INFO"),
@@ -204,9 +189,6 @@ def _dict_to_config(data: Dict) -> Config:
         )
 
     return Config(
-        mode=data.get("mode", "backtest"),
-        bar_interval=data.get("bar_interval", "1m"),
-        backtest=backtest,
         data_sources=data.get(
             "data_sources", {"CN": "akshare", "HK": "yfinance", "US": "yfinance"}
         ),
@@ -232,12 +214,6 @@ def _validate(data: Dict) -> None:
 # ---------------------------------------------------------------------------
 
 _DEFAULT_CONFIG: Dict = {
-    "mode": "backtest",
-    "bar_interval": "1m",
-    "backtest": {
-        "start_date": "2023-01-01",
-        "end_date": "2023-12-31",
-    },
     "data_sources": {
         "CN": "akshare",
         "HK": "yfinance",

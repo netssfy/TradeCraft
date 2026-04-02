@@ -2,14 +2,6 @@
 # Trader 配置已移至 data/traders/{name}/trader.json
 # 通过 CLI 或 REST API 创建 trader
 
-mode: backtest
-
-bar_interval: 1m
-
-backtest:
-  start_date: "2026-01-01"
-  end_date: "2026-03-20"
-
 data_sources:
   CN: akshare
   HK: yfinance
