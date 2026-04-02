@@ -12,7 +12,7 @@ import pandas as pd
 from app.adapters.data_feed import AkshareDataFeed, BaostockDataFeed, DataFeed, YfinanceDataFeed
 from app.adapters.simulator import Simulator
 from app.core.config import Config, load_config
-from app.data.market import Market
+from app.data.market import BarInterval, Market
 from app.data.repository import MarketRepository
 from app.engine.core import Engine, EngineMode
 from app.engine.trader import Trader
@@ -45,6 +45,17 @@ def _parse_market(value: str) -> Market:
     except Exception as exc:
         valid = ", ".join(m.value for m in Market)
         raise argparse.ArgumentTypeError(f"Invalid market '{value}'. Expected one of: {valid}") from exc
+
+
+def _parse_interval(value: str) -> BarInterval:
+    normalized = value.strip().lower()
+    try:
+        return BarInterval(normalized)
+    except Exception as exc:
+        valid = ", ".join(i.value for i in BarInterval)
+        raise argparse.ArgumentTypeError(
+            f"Invalid interval '{value}'. Expected one of: {valid}"
+        ) from exc
 
 
 def _parse_date(value: str) -> date:
