@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Generator, List, Optional
 
+from app.core.ai_agent import build_agent_cmd
 from app.data.market import Market
 from app.data.repository import MarketRepository
 from app.engine.context import Context
@@ -234,18 +235,13 @@ class Trader:
 # Strategy research (Codex)
 # ------------------------------------------------------------------
 
-def _codex_cmd() -> List[str]:
+def _agent_cmd() -> List[str]:
+    from app.core.config import load_config
     repo_root = Path(__file__).resolve().parents[3]
-    return [
-        "codex.cmd",
-        "exec",
-        "-C",
-        str(repo_root),
-        "--dangerously-bypass-approvals-and-sandbox",
-        "--sandbox",
-        "danger-full-access",
-        "-",
-    ]
+    config_path = repo_root / "backend" / "config.yaml"
+    cfg = load_config(str(config_path))
+    agent_type = cfg.ai_agent.type
+    return build_agent_cmd(agent_type, repo_root)
 
 
 def _research_prompt(
@@ -345,7 +341,7 @@ def research_strategy(
 
     try:
         process = subprocess.Popen(
-            _codex_cmd(),
+            _agent_cmd(),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,

@@ -18,3 +18,8 @@ data_sources:
 logging:
   level: INFO
   file: "data/logs/tradecraft.log"
+
+# AI Agent 配置
+# type 可选值: kiro | codex | claude
+ai_agent:
+  type: codex

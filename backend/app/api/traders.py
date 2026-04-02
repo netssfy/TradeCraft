@@ -13,6 +13,7 @@ from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 from starlette.responses import StreamingResponse
 
+from app.core.ai_agent import build_agent_cmd
 from app.engine.trader_store import TraderStore
 
 router = APIRouter(prefix="/traders", tags=["traders"])
@@ -141,7 +142,7 @@ def create_trader(req: CreateTraderRequest):
 
         try:
             process = subprocess.Popen(
-                _build_codex_cmd(),
+                _build_agent_cmd(),
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -616,18 +617,13 @@ def _days_in_month(year: int, month: int) -> int:
     return 31
 
 
-def _build_codex_cmd() -> List[str]:
+def _build_agent_cmd() -> List[str]:
+    from app.core.config import load_config
     repo_root = Path(__file__).resolve().parents[3]
-    return [
-        "codex.cmd",
-        "exec",
-        "-C",
-        str(repo_root),
-        "--dangerously-bypass-approvals-and-sandbox",
-        "--sandbox",
-        "danger-full-access",
-        "-",
-    ]
+    config_path = repo_root / "backend" / "config.yaml"
+    cfg = load_config(str(config_path))
+    agent_type = cfg.ai_agent.type
+    return build_agent_cmd(agent_type, repo_root)
 
 
 def _build_codex_prompt(req: CreateTraderRequest) -> str:

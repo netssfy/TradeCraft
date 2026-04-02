@@ -35,6 +35,11 @@ class LoggingConfig:
 
 
 @dataclass
+class AiAgentConfig:
+    type: str = "codex"  # kiro | codex | claude
+
+
+@dataclass
 class TraderConfig:
     id: str = ""
     market: str = "CN"
@@ -60,6 +65,7 @@ class Config:
     )
     traders: List[TraderConfig] = field(default_factory=list)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
+    ai_agent: AiAgentConfig = field(default_factory=AiAgentConfig)
 
 
 # ---------------------------------------------------------------------------
@@ -206,6 +212,9 @@ def _dict_to_config(data: Dict) -> Config:
         ),
         traders=traders,
         logging=logging_cfg,
+        ai_agent=AiAgentConfig(
+            type=data.get("ai_agent", {}).get("type", "codex")
+        ),
     )
 
 
@@ -238,6 +247,9 @@ _DEFAULT_CONFIG: Dict = {
     "logging": {
         "level": "INFO",
         "file": "data/logs/tradecraft.log",
+    },
+    "ai_agent": {
+        "type": "codex",
     },
 }
 
