@@ -487,7 +487,7 @@ def delete_backtest_run(trader_id: str, run_id: str):
 def run_backtest_once(trader_id: str, req: BacktestRunRequest):
     from app.adapters.data_feed import AkshareDataFeed, BaostockDataFeed, YfinanceDataFeed
     from app.adapters.simulator import Simulator
-    from app.core.config import BacktestConfig, Config
+    from app.core.config import load_config
     from app.data.repository import MarketRepository
     from app.engine.core import Engine, EngineMode
     from app.engine.trader import Trader
@@ -508,14 +508,8 @@ def run_backtest_once(trader_id: str, req: BacktestRunRequest):
     if start_date > end_date:
         raise HTTPException(status_code=400, detail="start_date must be <= end_date")
 
-    config = Config(
-        mode="backtest",
-        bar_interval="1m",
-        backtest=BacktestConfig(
-            start_date=start_date.isoformat(),
-            end_date=end_date.isoformat(),
-        ),
-    )
+    repo_root = Path(__file__).resolve().parents[3]
+    config = load_config(str(repo_root / "backend" / "config.yaml"))
 
     repository = MarketRepository()
     simulator = Simulator(commission_rate=0.0003)
@@ -558,6 +552,8 @@ def run_backtest_once(trader_id: str, req: BacktestRunRequest):
         data_feeds=[feed_cls()],
         config=config,
         store=store,
+        backtest_start=start_date.isoformat(),
+        backtest_end=end_date.isoformat(),
     )
 
     try:
