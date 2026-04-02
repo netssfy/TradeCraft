@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -64,6 +65,7 @@ class Engine:
             self._run_id: str = datetime.utcnow().strftime("%Y%m%d")
         else:
             self._run_id: str = datetime.utcnow().strftime("%Y%m%d_%H%M%S_") + str(uuid.uuid4())[:8]
+        self._trader_run_ids: Dict[int, str] = self._build_trader_run_ids()
 
         # Build a mapping: Market → DataFeed for quick lookup
         self._feed_for_market: Dict[Market, DataFeed] = {}
@@ -71,6 +73,32 @@ class Engine:
             for market in feed.supported_markets:
                 # Later feeds in the list override earlier ones for the same market
                 self._feed_for_market[market] = feed
+
+    def _build_trader_run_ids(self) -> Dict[int, str]:
+        mapping: Dict[int, str] = {}
+        if self.mode == EngineMode.PAPER:
+            for trader in self.traders:
+                mapping[id(trader)] = self._run_id
+            return mapping
+
+        used: set[str] = set()
+        single_trader = len(self.traders) == 1
+        for idx, trader in enumerate(self.traders):
+            run_id = self._run_id
+            if not single_trader:
+                strategy_name = getattr(trader, "active_strategy", None) or f"strategy_{idx + 1}"
+                strategy_slug = re.sub(r"[^A-Za-z0-9._-]+", "_", strategy_name).strip("_") or "strategy"
+                run_id = f"{self._run_id}__{strategy_slug}"
+                suffix = 2
+                while run_id in used:
+                    run_id = f"{self._run_id}__{strategy_slug}_{suffix}"
+                    suffix += 1
+            used.add(run_id)
+            mapping[id(trader)] = run_id
+        return mapping
+
+    def run_id_for_trader(self, trader: object) -> str:
+        return self._trader_run_ids.get(id(trader), self._run_id)
 
     # ------------------------------------------------------------------
     # Task 11.1 — _warmup()
@@ -255,13 +283,14 @@ class Engine:
                 try:
                     close_date = _get_close_date(trader, bar_time)
                     # 收盘快照去重：同一天只保存一次
-                    snap_key = f"{trader.id}:{close_date}" if close_date else None
+                    strategy_key = getattr(trader, "active_strategy", None) or "active"
+                    snap_key = f"{trader.id}:{strategy_key}:{close_date}" if close_date else None
                     if snap_key and snap_key in self._saved_close_dates:
                         close_date = None
                     elif snap_key:
                         self._saved_close_dates.add(snap_key)
                     trader.save_portfolio(self.store, mode="paper", date=close_date)
-                    trader.save_trades(self.store, self._run_id, mode="paper")
+                    trader.save_trades(self.store, self.run_id_for_trader(trader), mode="paper")
                 except Exception as exc:
                     logger.error("PAPER persist failed for trader '%s': %s", trader.id, exc)
 
@@ -270,7 +299,8 @@ class Engine:
             for trader in self.traders:
                 close_date = _get_close_date(trader, bar_time)
                 if close_date:
-                    snap_key = f"{trader.id}:{close_date}"
+                    strategy_key = getattr(trader, "active_strategy", None) or "active"
+                    snap_key = f"{trader.id}:{strategy_key}:{close_date}"
                     if snap_key in self._saved_close_dates:
                         continue
                     self._saved_close_dates.add(snap_key)
@@ -279,7 +309,7 @@ class Engine:
                             self.store,
                             mode="backtest",
                             date=close_date,
-                            run_id=self._run_id,
+                            run_id=self.run_id_for_trader(trader),
                         )
                         logger.info("BACKTEST portfolio snapshot saved for trader '%s' date=%s → %s", trader.id, close_date, path)
                     except Exception as exc:
@@ -458,7 +488,7 @@ class Engine:
         mode = "paper" if self.mode == EngineMode.PAPER else "backtest"
         for trader in self.traders:
             try:
-                path = trader.save_trades(self.store, self._run_id, mode=mode)
+                path = trader.save_trades(self.store, self.run_id_for_trader(trader), mode=mode)
                 logger.info("Trade records persisted for trader '%s' → %s", trader.id, path)
             except Exception as exc:
                 logger.error("Failed to persist trade records for trader '%s': %s", trader.id, exc)
@@ -519,7 +549,7 @@ class Engine:
                 backtest_end=backtest_end,
                 initial_cash=initial_cash,
                 final_nav=final_nav,
-                strategy_filename=getattr(trader, "strategy_filename", None),
+                strategy_filename=getattr(trader, "active_strategy", None),
                 metrics=metrics_dict,
             )
 
@@ -527,7 +557,7 @@ class Engine:
             try:
                 path = self.store.save_report(
                     trader.id,
-                    self._run_id,
+                    self.run_id_for_trader(trader),
                     json.loads(report.to_json()),
                     mode="backtest",
                 )

@@ -5,7 +5,7 @@ import json
 from collections import defaultdict
 from datetime import date, datetime, time, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import pandas as pd
 
@@ -226,25 +226,35 @@ def cmd_backtest_run(args: argparse.Namespace) -> int:
     )
 
     store = TraderStore(base_dir=args.traders_dir)
+    strategy_targets: List[Optional[str]]
+    if args.strategy_list:
+        cleaned = [s.strip() for s in args.strategy_list.split(",") if s.strip()]
+        if not cleaned:
+            raise ValueError("--strategy-list cannot be empty")
+        strategy_targets = list(dict.fromkeys(cleaned))
+    else:
+        strategy_filename = args.strategy_filename.strip() if args.strategy_filename else None
+        strategy_targets = [strategy_filename or None]
+
     repository = MarketRepository(base_path=args.market_root)
     simulator = Simulator(commission_rate=0.0003)
-    strategy_filename = args.strategy_filename.strip() if args.strategy_filename else None
-    strategy_filename = strategy_filename or None
-
-    trader = Trader.from_dir(
-        args.trader_id,
-        store,
-        repository,
-        simulator,
-        strategy_filename=strategy_filename,
-        require_active_strategy=False,
-    )
-    feed_name = run_cfg.data_sources.get(trader.market.value, "yfinance")
+    traders: List[Trader] = []
+    for target_strategy in strategy_targets:
+        traders.append(
+            Trader.from_dir(
+                args.trader_id,
+                store,
+                repository,
+                simulator,
+                active_strategy=target_strategy,
+            )
+        )
+    feed_name = run_cfg.data_sources.get(traders[0].market.value, "yfinance")
     feed = _resolve_data_feed(feed_name)
 
     engine = Engine(
         mode=EngineMode.BACKTEST,
-        traders=[trader],
+        traders=traders,
         repository=repository,
         simulator=simulator,
         data_feeds=[feed],
@@ -254,18 +264,28 @@ def cmd_backtest_run(args: argparse.Namespace) -> int:
         backtest_end=end_date.isoformat(),
     )
     engine.start()
-    trader.save_trades(store, engine._run_id, mode="backtest")
-    report = store.load_report(args.trader_id, engine._run_id, mode="backtest")
+
+    runs: List[Dict[str, Any]] = []
+    for trader in traders:
+        run_id = engine.run_id_for_trader(trader)
+        trader.save_trades(store, run_id, mode="backtest")
+        report = store.load_report(args.trader_id, run_id, mode="backtest")
+        runs.append(
+            {
+                "strategy": trader.active_strategy,
+                "run_id": run_id,
+                "report": report,
+            }
+        )
 
     _print_json(
         {
             "trader_id": args.trader_id,
-            "run_id": engine._run_id,
+            "run_id": runs[0]["run_id"],
+            "runs": runs,
             "start_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),
             "bar_interval": "1m",
-            "strategy_filename": trader.strategy_filename,
-            "report": report,
         }
     )
     return 0
@@ -324,6 +344,10 @@ def _build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--start-date", help="YYYY-MM-DD")
     run_parser.add_argument("--end-date", help="YYYY-MM-DD")
     run_parser.add_argument("--strategy-filename", help="Optional strategy file to run")
+    run_parser.add_argument(
+        "--strategy-list",
+        help="Optional comma-separated strategy filenames for batch backtest run",
+    )
     run_parser.add_argument("--config-path", default="config.yaml")
     run_parser.add_argument("--traders-dir", default="data/traders")
     run_parser.add_argument("--market-root", default="data/market")

@@ -86,7 +86,12 @@ export const api = {
 
   runBacktest: (
     id: string,
-    range?: { start_date?: string; end_date?: string; strategy_filename?: string }
+    range?: {
+      start_date?: string;
+      end_date?: string;
+      strategy_filename?: string;
+      strategy_list?: string[];
+    }
   ) =>
     request<BacktestRunResult>(`/traders/${id}/backtest/run`, {
       method: 'POST',

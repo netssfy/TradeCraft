@@ -98,6 +98,10 @@ export interface BacktestReport {
 export interface BacktestRunResult {
   trader_id: string;
   run_id: string;
+  runs?: Array<{
+    strategy: string;
+    run_id: string;
+  }>;
 }
 
 export interface MarketDataItem {

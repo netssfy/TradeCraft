@@ -281,16 +281,11 @@ export default function TraderDetailPage() {
     setError(null);
 
     try {
-      let lastRunId: string | null = null;
-
-      for (const strategyFilename of strategyFilenames) {
-        const result = await api.runBacktest(id, {
-          start_date: startDate,
-          end_date: endDate,
-          strategy_filename: strategyFilename,
-        });
-        lastRunId = result.run_id;
-      }
+      const result = await api.runBacktest(id, {
+        start_date: startDate,
+        end_date: endDate,
+        strategy_list: strategyFilenames,
+      });
 
       await refreshRuns(id);
       setMode('backtest');
@@ -298,7 +293,8 @@ export default function TraderDetailPage() {
         if (prev && strategyFilenames.includes(prev)) return prev;
         return strategyFilenames[0] ?? null;
       });
-      if (lastRunId) setSelectedBacktestRunId(lastRunId);
+      const latestRunId = result.runs?.length ? result.runs[result.runs.length - 1]?.run_id : result.run_id;
+      if (latestRunId) setSelectedBacktestRunId(latestRunId);
       setShowBacktestConfig(false);
     } catch (e: any) {
       setError(`${tx('Failed to start backtest', 'Failed to start backtest')}: ${e.message}`);

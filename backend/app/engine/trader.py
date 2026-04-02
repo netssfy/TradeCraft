@@ -44,7 +44,8 @@ class Trader:
         commission_rate: float = 0.0003,
         order_timeout_seconds: int = 300,
         traits: Optional[dict] = None,
-        strategy_filename: Optional[str] = None,
+        active_strategy: Optional[str] = None,
+        strategy_list: Optional[List[str]] = None,
     ) -> None:
         self.id = id
         self.market = market
@@ -57,7 +58,10 @@ class Trader:
         self.commission_rate = commission_rate
         self.order_timeout_seconds = order_timeout_seconds
         self.traits: dict = traits or {}
-        self.strategy_filename = strategy_filename
+        self.active_strategy = active_strategy
+        self.strategy_list = list(strategy_list or [])
+        if self.active_strategy and self.active_strategy not in self.strategy_list:
+            self.strategy_list.append(self.active_strategy)
 
     # ------------------------------------------------------------------
     # Factory — 从 trader 目录加载
@@ -70,8 +74,7 @@ class Trader:
         store: "TraderStore",  # noqa: F821 — resolved at runtime
         repository: MarketRepository,
         simulator: "Simulator",
-        strategy_filename: Optional[str] = None,
-        require_active_strategy: bool = True,
+        active_strategy: Optional[str] = None,
     ) -> "Trader":
         """从 data/traders/{name}/ 目录加载 Trader。
 
@@ -97,15 +100,25 @@ class Trader:
         order_timeout_seconds: int = int(info.get("order_timeout_seconds", 300))
         traits: dict = info.get("traits", {})
 
+        strategy_dir = store.strategy_dir(name)
+        strategy_list = sorted(
+            f for f in os.listdir(strategy_dir)
+            if f.endswith(".py")
+        ) if os.path.isdir(strategy_dir) else []
+
         # 加载策略
         strategy_path = store.get_strategy_path(
             name,
-            strategy_filename=strategy_filename,
-            require_active=require_active_strategy,
+            strategy_filename=active_strategy,
+            require_active=(active_strategy is None),
         )
         result = StrategyLoader.load(strategy_path)
         if not result.success:
             raise ValueError(f"Failed to load strategy for trader '{name}': {result.error}")
+        resolved_active_strategy = os.path.basename(strategy_path)
+        if resolved_active_strategy not in strategy_list:
+            strategy_list.append(resolved_active_strategy)
+            strategy_list.sort()
 
         event_bus = EventBus()
         order_manager = OrderManager(
@@ -145,7 +158,8 @@ class Trader:
             commission_rate=commission_rate,
             order_timeout_seconds=order_timeout_seconds,
             traits=traits,
-            strategy_filename=os.path.basename(strategy_path),
+            active_strategy=resolved_active_strategy,
+            strategy_list=strategy_list,
         )
 
     # ------------------------------------------------------------------

@@ -82,12 +82,20 @@ class StrategyCodeModel(BaseModel):
 class BacktestRunResult(BaseModel):
     trader_id: str
     run_id: str
+    runs: List[Dict[str, str]] = Field(default_factory=list)
 
 
 class BacktestRunRequest(BaseModel):
     start_date: Optional[str] = Field(None, description="Backtest start date (YYYY-MM-DD)")
     end_date: Optional[str] = Field(None, description="Backtest end date (YYYY-MM-DD)")
-    strategy_filename: Optional[str] = Field(None, description="Strategy filename to run for this backtest")
+    strategy_filename: Optional[str] = Field(
+        None,
+        description="Strategy filename to run for this backtest (single-strategy compatibility).",
+    )
+    strategy_list: Optional[List[str]] = Field(
+        None,
+        description="Optional list of strategy filenames to run in one backtest request.",
+    )
 
 
 class BacktestMetricsModel(BaseModel):
@@ -511,42 +519,68 @@ def run_backtest_once(trader_id: str, req: BacktestRunRequest):
     repo_root = Path(__file__).resolve().parents[3]
     config = load_config(str(repo_root / "backend" / "config.yaml"))
 
-    repository = MarketRepository()
-    simulator = Simulator(commission_rate=0.0003)
-    strategy_filename = req.strategy_filename
-    if strategy_filename is not None:
-        strategy_filename = strategy_filename.strip() or None
+    strategy_targets: List[Optional[str]]
+    if req.strategy_list is not None:
+        cleaned = [s.strip() for s in req.strategy_list if s and s.strip()]
+        if not cleaned:
+            raise HTTPException(status_code=400, detail="strategy_list cannot be empty")
+        # Keep order while removing duplicates.
+        strategy_targets = list(dict.fromkeys(cleaned))
+    elif req.strategy_filename is not None:
+        one = req.strategy_filename.strip()
+        strategy_targets = [one] if one else [None]
+    else:
+        # Default backtest: run the trader's active strategy.
+        strategy_targets = [None]
 
-    try:
-        trader = Trader.from_dir(
-            trader_id,
-            store,
-            repository,
-            simulator,
-            strategy_filename=strategy_filename,
-            require_active_strategy=False,
+    available_strategies = sorted(
+        f for f in os.listdir(store.strategy_dir(trader_id))
+        if f.endswith(".py")
+    )
+    requested = [s for s in strategy_targets if s is not None]
+    invalid = [s for s in requested if s not in available_strategies]
+    if invalid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown strategy file(s): {', '.join(invalid)}",
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid strategy selection: {exc}")
 
     feed_cls_map = {
         "akshare": AkshareDataFeed,
         "baostock": BaostockDataFeed,
         "yfinance": YfinanceDataFeed,
     }
-    feed_name = config.data_sources.get(trader.market.value, "yfinance").lower()
+    repository = MarketRepository()
+    simulator = Simulator(commission_rate=0.0003)
+    traders: List[Trader] = []
+    for target_strategy in strategy_targets:
+        try:
+            traders.append(
+                Trader.from_dir(
+                    trader_id,
+                    store,
+                    repository,
+                    simulator,
+                    active_strategy=target_strategy,
+                )
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid strategy selection: {exc}")
+
+    market_value = traders[0].market.value
+    feed_name = config.data_sources.get(market_value, "yfinance").lower()
     feed_cls = feed_cls_map.get(feed_name)
     if feed_cls is None:
         raise HTTPException(
             status_code=400,
-            detail=f"Unknown data source '{feed_name}' for market '{trader.market.value}'.",
+            detail=f"Unknown data source '{feed_name}' for market '{market_value}'.",
         )
 
     engine = Engine(
         mode=EngineMode.BACKTEST,
-        traders=[trader],
+        traders=traders,
         repository=repository,
         simulator=simulator,
         data_feeds=[feed_cls()],
@@ -563,12 +597,35 @@ def run_backtest_once(trader_id: str, req: BacktestRunRequest):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Backtest failed: {exc}")
 
-    # Ensure trade run metadata exists even when there are no fills.
-    trader.save_trades(store, engine._run_id, mode="backtest")
-    logger.info("Backtest API completed: trader_id=%s run_id=%s", trader_id, engine._run_id)
-    engine_logger.info("Backtest API completed: trader_id=%s run_id=%s", trader_id, engine._run_id)
+    run_results: List[Dict[str, str]] = []
+    for trader in traders:
+        run_id = engine.run_id_for_trader(trader)
+        # Ensure trade run metadata exists even when there are no fills.
+        trader.save_trades(store, run_id, mode="backtest")
+        logger.info(
+            "Backtest API completed: trader_id=%s strategy=%s run_id=%s",
+            trader_id,
+            trader.active_strategy,
+            run_id,
+        )
+        engine_logger.info(
+            "Backtest API completed: trader_id=%s strategy=%s run_id=%s",
+            trader_id,
+            trader.active_strategy,
+            run_id,
+        )
+        run_results.append(
+            {
+                "strategy": trader.active_strategy or "",
+                "run_id": run_id,
+            }
+        )
 
-    return BacktestRunResult(trader_id=trader_id, run_id=engine._run_id)
+    return BacktestRunResult(
+        trader_id=trader_id,
+        run_id=run_results[0]["run_id"],
+        runs=run_results,
+    )
 
 
 def _assert_exists(trader_id: str):
