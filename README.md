@@ -1,144 +1,146 @@
-﻿# TradeCraft
+# TradeCraft
 
-AI编写，AI驱动，AI自己研究策略
+Written by AI, powered by AI, researched by AI, with AI-implemented strategies.
 
-## 界面预览
+Still limited by the lack of higher-frequency data for AI research~~~
 
-> 本节截图来自本地开发环境 `http://localhost:5173`（2026-03-31）。
+## UI Preview
 
-### 功能截图（桌面端）
+> Screenshots in this section are from the local development environment `http://localhost:5173` (2026-03-31).
 
-#### 交易员列表
+### Feature Screenshots (Desktop)
+
+#### Trader List
 ![Trader List](docs/images/ui-trader-list.png)
 
-#### 创建交易员
+#### Create Trader
 ![Create Trader](docs/images/ui-trader-create.png)
 
-#### 交易员详情
+#### Trader Detail
 ![Trader Detail](docs/images/ui-trader-detail.png)
 
-#### 策略源码页
+#### Strategy Source Page
 ![Strategy Code](docs/images/ui-strategy-code.png)
 
-#### 市场数据页
+#### Market Data Page
 ![Market Data](docs/images/ui-market-data.png)
 
-### 演示动图
+### Demo GIF
 
 ![TradeCraft Overview GIF](docs/images/ui-overview.gif)
 
 
-## 目录结构
+## Project Structure
 
 ```text
 TradeCraft/
-├─ backend/
-│  ├─ app/
-│  │  ├─ adapters/
-│  │  ├─ api/
-│  │  ├─ backtest/
-│  │  ├─ core/
-│  │  ├─ data/
-│  │  ├─ engine/
-│  │  ├─ models/
-│  │  ├─ runtimes/
-│  │  └─ trading/
-│  └─ tests/
-├─ packages/
-│  ├─ shared/
-│  │  └─ src/
-│  │     ├─ types/
-│  │     └─ utils/
-│  └─ web/
-│     ├─ dist/
-│     └─ src/
-│        ├─ components/
-│        ├─ hooks/
-│        ├─ pages/
-│        ├─ services/
-│        └─ styles/
-├─ skills/
-│  └─ retail-quant-trainer/
-│     ├─ agents/
-│     └─ references/
-└─ .kiro/
+|-- backend/
+|   |-- app/
+|   |   |-- adapters/
+|   |   |-- api/
+|   |   |-- backtest/
+|   |   |-- core/
+|   |   |-- data/
+|   |   |-- engine/
+|   |   |-- models/
+|   |   |-- runtimes/
+|   |   `-- trading/
+|   `-- tests/
+|-- packages/
+|   |-- shared/
+|   |   `-- src/
+|   |       |-- types/
+|   |       `-- utils/
+|   `-- web/
+|       |-- dist/
+|       `-- src/
+|           |-- components/
+|           |-- hooks/
+|           |-- pages/
+|           |-- services/
+|           `-- styles/
+|-- skills/
+|   `-- retail-quant-trainer/
+|       |-- agents/
+|       `-- references/
+`-- .kiro/
 ```
 
-## 运行时数据目录（重要）
+## Runtime Data Directory (Important)
 
-> 以下目录通常在运行后生成，默认位于项目根目录 `data/` 下。
+> The following directories are typically generated after runtime and are located under `data/` at the project root by default.
 
 ```text
 data/
-├─ market/
-│  └─ {market}/{symbol}/{interval}/{period}.parquet
-└─ traders/
-   └─ {trader_id}/
-      ├─ trader.json
-      ├─ strategy/
-      │  └─ *.py
-      ├─ trades/
-      │  ├─ paper/{run_id}/trades.json
-      │  └─ backtest/{run_id}/
-      │     ├─ trades.json
-      │     └─ report.json
-      └─ portfolio/
-         ├─ paper.json
-         └─ {backtest_run_id}.json
+|-- market/
+|   `-- {market}/{symbol}/{interval}/{period}.parquet
+`-- traders/
+    `-- {trader_id}/
+        |-- trader.json
+        |-- strategy/
+        |   `-- *.py
+        |-- trades/
+        |   |-- paper/{run_id}/trades.json
+        |   `-- backtest/{run_id}/
+        |       |-- trades.json
+        |       `-- report.json
+        `-- portfolio/
+            |-- paper.json
+            `-- {backtest_run_id}.json
 ```
 
-## 系统功能总览
+## System Feature Overview
 
-### 交易员管理
+### Trader Management
 
-- 创建交易员：支持填写市场（CN/HK/US）、初始资金、可交易标的、手续费率、订单超时。
-- 创建过程支持 SSE 流式反馈：前端可实时查看训练/生成日志与错误信息。
-- 自动生成六维交易特质：风险偏好、持有周期、信号偏好、仓位构建、止盈止损纪律、标的偏好。
-- 查询交易员列表与详情：查看基础参数、特质、策略、组合表现。
-- 编辑交易员：支持更新资金、标的池、手续费、超时参数和特质字段。
-- 删除交易员：删除交易员及其目录数据。
+- Create traders: supports market selection (CN/HK/US), initial capital, tradable symbols, fee rate, and order timeout.
+- Trader creation supports SSE streaming feedback: the frontend can view training/generation logs and errors in real time.
+- Automatically generates six-dimensional trading traits: risk preference, holding period, signal preference, position construction, take-profit/stop-loss discipline, and symbol preference.
+- Query trader list and details: view base parameters, traits, strategies, and portfolio performance.
+- Edit traders: supports updating capital, symbol pool, fees, timeout parameters, and trait fields.
+- Delete traders: removes traders and their directory data.
 
-### 策略管理与研究
+### Strategy Management and Research
 
-- 策略文件管理：列出策略文件并设置 active strategy。
-- 策略源码查看：支持从交易员详情页新窗口打开策略源码页面。
-- 策略研究（Create/Update）：通过 Codex 流式执行研究，支持新建策略或基于指定策略更新。
-- 策略研究日志可视化：前端按 info/warning/error/result 分类展示流式消息。
+- Strategy file management: list strategy files and set the active strategy.
+- Strategy source viewing: supports opening the strategy source page in a new window from the trader detail page.
+- Strategy research (Create/Update): uses Codex for streamed research execution, supporting creating a new strategy or updating a specified strategy.
+- Strategy research log visualization: the frontend displays streamed messages by info/warning/error/result categories.
 
-### 回测与组合分析
+### Backtesting and Portfolio Analysis
 
-- 一键运行回测：支持配置起止日期与回测策略文件。
-- 支持未设置 active strategy 的回测执行（可显式指定策略文件）。
-- 回测 Run 管理：列出 run_id、按 run_id 查看交易与组合快照。
-- 回测报告：提供年化收益、最大回撤、夏普、胜率、盈亏比、最终净值等指标。
-- 回测筛选：按策略文件筛选回测 run。
-- 删除回测 run：删除 run 对应交易记录、报告和组合快照文件。
-- 交易记录分页展示：按模式（paper/backtest）与 run 维度查看。
+- One-click backtest run: supports configuring start/end dates and backtest strategy files.
+- Supports backtests even when no active strategy is set (strategy file can be explicitly specified).
+- Backtest run management: list `run_id` and view trades and portfolio snapshots by `run_id`.
+- Backtest reports: provides annualized return, max drawdown, Sharpe ratio, win rate, profit/loss ratio, final net value, and other metrics.
+- Backtest filtering: filter backtest runs by strategy file.
+- Delete backtest runs: remove trade records, reports, and portfolio snapshot files for a run.
+- Paginated trade record view: view records by mode (`paper`/`backtest`) and run.
 
-### 市场数据浏览
+### Market Data Browsing
 
-- 市场数据可用性总览：统计市场数、标的数、周期数、组合数、文件总数。
-- 本地 parquet 结构扫描：按 `{market}/{symbol}/{interval}/{period}` 聚合展示。
-- 文件级明细浏览：分页读取 parquet 行数据并展示字段列。
-- 支持从总览直接跳转到指定 period 的文件详情页。
+- Market data availability overview: statistics for number of markets, symbols, intervals, combinations, and total files.
+- Local parquet structure scan: aggregated display by `{market}/{symbol}/{interval}/{period}`.
+- File-level detail browsing: paginated parquet row reads with field column display.
+- Supports direct navigation from overview to the detail page of a specified period file.
 
-### 运行时数据与持久化
+### Runtime Data and Persistence
 
-- 交易员数据目录化：每个交易员独立存放配置、策略、交易记录、组合快照。
-- 回测记录按 run_id 结构化存储：`trades/backtest/{run_id}/trades.json` 与 `report.json`。
-- 组合快照支持 paper 与 backtest 分离，backtest 支持按 run_id 单文件存储。
-- 兼容历史数据布局：读取和删除逻辑包含旧格式回退处理。
+- Trader data directory-based storage: each trader stores config, strategies, trade records, and portfolio snapshots independently.
+- Backtest records are structured by `run_id`: `trades/backtest/{run_id}/trades.json` and `report.json`.
+- Portfolio snapshots support separate storage for paper and backtest; backtest supports single-file storage by `run_id`.
+- Compatible with historical data layouts: read/delete logic includes fallback handling for old formats.
 
-### 前端体验与可用性
+### Frontend Experience and Usability
 
-- 中英文界面切换（zh/en），并持久化语言偏好。
-- 明暗主题切换（dark/light），并持久化主题偏好。
-- 统一错误提示、加载态、空态展示。
-- 交易员列表支持按 paper 收益排序并展示近期回测组合收益摘要。
+- Chinese/English UI switching (`zh`/`en`) with persisted language preference.
+- Dark/light theme switching (`dark`/`light`) with persisted theme preference.
+- Unified display for error prompts, loading states, and empty states.
+- Trader list supports sorting by paper returns and showing recent backtest portfolio return summaries.
 
-### 后端与开放接口
+### Backend and Open Interfaces
 
-- FastAPI 服务，自动提供 OpenAPI 文档：`/docs` 与 `/redoc`。
-- 交易员 API：创建、查询、更新、删除、策略管理、组合查询、交易查询、回测执行与删除。
-- 市场数据 API：可用性查询与文件明细分页查询。
-- 跨域支持：默认允许本地前端开发地址访问（5173）。
+- FastAPI service with automatic OpenAPI docs: `/docs` and `/redoc`.
+- Trader APIs: create, query, update, delete, strategy management, portfolio query, trade query, backtest execution, and deletion.
+- Market data APIs: availability query and paginated file-detail query.
+- CORS support: local frontend development origin (5173) is allowed by default.
