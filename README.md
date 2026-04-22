@@ -1,5 +1,7 @@
 # TradeCraft
 
+Language: English | [简体中文](./README_zh.md)
+
 Written by AI, powered by AI, researched by AI, with AI-implemented strategies.
 
 Still limited by the lack of higher-frequency data for AI research~~~

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Juejin Quant"
+  short_description: "Understand and apply Juejin Python SDK capabilities."
+  default_prompt: "Use Juejin Python SDK docs to answer capability questions and map tasks to correct APIs."
